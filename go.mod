@@ -1,7 +1,6 @@
 module github.com/anacrolix/torrent
 
 require (
-	bazil.org/fuse v0.0.0-20180421153158-65cc252bf669
 	github.com/RoaringBitmap/roaring v0.4.18 // indirect
 	github.com/anacrolix/dht v1.0.1
 	github.com/anacrolix/dht/v2 v2.0.1
@@ -19,7 +18,6 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/elgatito/upnp v0.0.0-20180711183757-2f244d205f9a
-	github.com/fsnotify/fsnotify v1.4.7
 	github.com/glycerine/goconvey v0.0.0-20190315024820-982ee783a72e // indirect
 	github.com/google/btree v1.0.0
 	github.com/gopherjs/gopherjs v0.0.0-20190309154008-847fc94819f9 // indirect

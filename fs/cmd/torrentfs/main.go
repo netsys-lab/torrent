@@ -18,8 +18,8 @@ import (
 	_ "github.com/anacrolix/envpprof"
 	"github.com/anacrolix/tagflag"
 	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/fs"
-	"github.com/anacrolix/torrent/util/dirwatch"
+	torrentfs "github.com/anacrolix/torrent/fs"
+	"github.com/anacrolix/torrent/fs/dirwatch"
 )
 
 var (
