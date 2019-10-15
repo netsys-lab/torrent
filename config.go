@@ -12,6 +12,7 @@ import (
 	"github.com/anacrolix/missinggo"
 	"github.com/anacrolix/missinggo/conntrack"
 	"github.com/anacrolix/missinggo/expect"
+	"github.com/scionproto/scion/go/lib/snet"
 	"golang.org/x/time/rate"
 
 	"github.com/anacrolix/torrent/iplist"
@@ -65,6 +66,8 @@ type ClientConfig struct {
 	DisableUTP bool
 	// For the bittorrent protocol.
 	DisableTCP bool `long:"disable-tcp"`
+	// For the bittorrent protocol.
+	DisableScion bool
 	// Called to instantiate storage for each added torrent. Builtin backends
 	// are in the storage package. If not set, the "file" implementation is
 	// used.
@@ -124,8 +127,9 @@ type ClientConfig struct {
 
 	// The IP addresses as our peers should see them. May differ from the
 	// local interfaces due to NAT or other network configurations.
-	PublicIp4 net.IP
-	PublicIp6 net.IP
+	PublicIp4       net.IP
+	PublicIp6       net.IP
+	PublicScionAddr snet.Addr
 
 	DisableAcceptRateLimiting bool
 	// Don't add connections that have the same peer ID as an existing

@@ -3,17 +3,18 @@ package torrent
 import "strings"
 
 var allPeerNetworks = func() (ret []network) {
-	for _, s := range []string{"tcp4", "tcp6", "udp4", "udp6"} {
+	for _, s := range []string{"tcp4", "tcp6", "udp4", "udp6", "scion4"} {
 		ret = append(ret, parseNetworkString(s))
 	}
 	return
 }()
 
 type network struct {
-	Ipv4 bool
-	Ipv6 bool
-	Udp  bool
-	Tcp  bool
+	Ipv4  bool
+	Ipv6  bool
+	Udp   bool
+	Tcp   bool
+	Scion bool
 }
 
 func (n network) String() (ret string) {
@@ -24,6 +25,7 @@ func (n network) String() (ret string) {
 	}
 	a(n.Udp, "udp")
 	a(n.Tcp, "tcp")
+	a(n.Scion, "scion")
 	a(n.Ipv4, "4")
 	a(n.Ipv6, "6")
 	return
@@ -37,6 +39,7 @@ func parseNetworkString(network string) (ret network) {
 	ret.Ipv6 = c("6")
 	ret.Udp = c("udp")
 	ret.Tcp = c("tcp")
+	ret.Scion = c("scion")
 	return
 }
 
@@ -51,6 +54,9 @@ func peerNetworkEnabled(n network, cfg *ClientConfig) bool {
 		return false
 	}
 	if cfg.DisableIPv4 && n.Ipv4 {
+		return false
+	}
+	if cfg.DisableScion && n.Scion {
 		return false
 	}
 	return true
