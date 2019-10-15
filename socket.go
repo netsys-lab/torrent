@@ -5,6 +5,11 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"time"
+
+	quic "github.com/lucas-clemente/quic-go"
+	"github.com/scionproto/scion/go/lib/snet"
+	"github.com/scionproto/scion/go/lib/snet/squic"
 
 	"github.com/anacrolix/missinggo"
 	"github.com/anacrolix/missinggo/perf"
@@ -30,15 +35,84 @@ func getProxyDialer(proxyURL string) (proxy.Dialer, error) {
 	return proxy.FromURL(fixedURL, proxy.Direct)
 }
 
-func listen(n network, addr, proxyURL string, f firewallCallback) (socket, error) {
+func listen(n network, cfg *ClientConfig, f firewallCallback) (socket, error) {
+	portStr := strconv.FormatInt(int64(cfg.ListenPort), 10)
 	switch {
 	case n.Tcp:
-		return listenTcp(n.String(), addr, proxyURL)
+		return listenTcp(n.String(), net.JoinHostPort(cfg.ListenHost(n.String()), portStr), cfg.ProxyURL)
 	case n.Udp:
-		return listenUtp(n.String(), addr, proxyURL, f)
+		return listenUtp(n.String(), net.JoinHostPort(cfg.ListenHost(n.String()), portStr), cfg.ProxyURL, f)
+	case n.Scion:
+		return listenScion(cfg.PublicScionAddr)
 	default:
 		panic(n)
 	}
+}
+
+type scionSocket struct {
+	net.Listener
+	local *snet.Addr
+	q     quic.Listener
+}
+
+func (s *scionSocket) Accept() (net.Conn, error) {
+	x, err := s.q.Accept(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := x.OpenStreamSync(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &squicStreamWrapper{
+		conn,
+		x.LocalAddr,
+		x.RemoteAddr,
+	}, nil
+}
+
+type squicStreamWrapper struct {
+	quic.Stream
+	local, remote func() net.Addr
+}
+
+func (w *squicStreamWrapper) LocalAddr() net.Addr {
+	return w.local()
+}
+func (w *squicStreamWrapper) RemoteAddr() net.Addr {
+	return w.remote()
+}
+
+func (s *scionSocket) dial(ctx context.Context, addr string) (net.Conn, error) {
+	snetAddr, err := snet.AddrFromString(addr)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := squic.DialSCION(nil, s.local, snetAddr, &quic.Config{KeepAlive: true})
+	if err != nil {
+		return nil, err
+	}
+	conn, err := sess.OpenStreamSync(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &squicStreamWrapper{
+		conn,
+		sess.LocalAddr,
+		sess.RemoteAddr,
+	}, nil
+}
+
+func listenScion(address *snet.Addr) (s socket, err error) {
+	scionSocket := &scionSocket{}
+	conn, err := squic.ListenSCION(nil, address, &quic.Config{KeepAlive: true})
+	if err != nil {
+		return nil, err
+	}
+	scionSocket.q = conn
+	return scionSocket, nil
 }
 
 func listenTcp(network, address, proxyURL string) (s socket, err error) {
@@ -81,16 +155,12 @@ func (me tcpSocket) dial(ctx context.Context, addr string) (net.Conn, error) {
 	return me.d(ctx, addr)
 }
 
-func listenAll(networks []network, getHost func(string) string, port int, proxyURL string, f firewallCallback) ([]socket, error) {
+func listenAll(networks []network, config *ClientConfig, f firewallCallback) ([]socket, error) {
 	if len(networks) == 0 {
 		return nil, nil
 	}
-	var nahs []networkAndHost
-	for _, n := range networks {
-		nahs = append(nahs, networkAndHost{n, getHost(n.String())})
-	}
 	for {
-		ss, retry, err := listenAllRetry(nahs, port, proxyURL, f)
+		ss, retry, err := listenAllRetry(networks, config, f)
 		if !retry {
 			return ss, err
 		}
@@ -102,10 +172,9 @@ type networkAndHost struct {
 	Host    string
 }
 
-func listenAllRetry(nahs []networkAndHost, port int, proxyURL string, f firewallCallback) (ss []socket, retry bool, err error) {
+func listenAllRetry(nahs []network, cfg *ClientConfig, f firewallCallback) (ss []socket, retry bool, err error) {
 	ss = make([]socket, 1, len(nahs))
-	portStr := strconv.FormatInt(int64(port), 10)
-	ss[0], err = listen(nahs[0].Network, net.JoinHostPort(nahs[0].Host, portStr), proxyURL, f)
+	ss[0], err = listen(nahs[0], cfg, f)
 	if err != nil {
 		return nil, false, errors.Wrap(err, "first listen")
 	}
@@ -117,12 +186,11 @@ func listenAllRetry(nahs []networkAndHost, port int, proxyURL string, f firewall
 			ss = nil
 		}
 	}()
-	portStr = strconv.FormatInt(int64(missinggo.AddrPort(ss[0].Addr())), 10)
 	for _, nah := range nahs[1:] {
-		s, err := listen(nah.Network, net.JoinHostPort(nah.Host, portStr), proxyURL, f)
+		s, err := listen(nah, cfg, f)
 		if err != nil {
 			return ss,
-				missinggo.IsAddrInUse(err) && port == 0,
+				missinggo.IsAddrInUse(err) && cfg.ListenPort == 0,
 				errors.Wrap(err, "subsequent listen")
 		}
 		ss = append(ss, s)

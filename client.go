@@ -227,7 +227,7 @@ func NewClient(cfg *ClientConfig) (cl *Client, err error) {
 		}
 	}
 
-	cl.conns, err = listenAll(cl.listenNetworks(), cl.config.ListenHost, cl.config.ListenPort, cl.config.ProxyURL, cl.firewallCallback)
+	cl.conns, err = listenAll(cl.listenNetworks(), cl.config, cl.firewallCallback)
 	if err != nil {
 		return
 	}
@@ -288,6 +288,9 @@ func (cl *Client) listenOnNetwork(n network) bool {
 		return false
 	}
 	if n.Udp && cl.config.DisableUTP && cl.config.NoDHT {
+		return false
+	}
+	if n.Scion && cl.config.DisableScion {
 		return false
 	}
 	return true

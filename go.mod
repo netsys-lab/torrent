@@ -22,12 +22,14 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/fsnotify/fsnotify v1.4.7
+	github.com/golang/mock v1.3.1 // indirect
 	github.com/google/btree v1.0.0
 	github.com/google/gopacket v1.1.17 // indirect
 	github.com/gosuri/uiprogress v0.0.1
 	github.com/inconshreveable/log15 v0.0.0-20180818164646-67afb5ed74ec // indirect
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/kormat/fmt15 v0.0.0-20181112140556-ee69fecb2656 // indirect
+	github.com/lucas-clemente/quic-go v0.12.1
 	github.com/mattn/go-colorable v0.1.4 // indirect
 	github.com/mattn/go-sqlite3 v1.10.0
 	github.com/pierrec/lz4 v1.0.1 // indirect

@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/scionproto/scion/go/lib/snet"
+
 	"golang.org/x/xerrors"
 
 	"github.com/anacrolix/log"
@@ -126,24 +128,28 @@ func addTorrents(client *torrent.Client) error {
 }
 
 var flags = struct {
-	Mmap            bool           `help:"memory-map torrent data"`
-	TestPeer        []*net.TCPAddr `help:"addresses of some starting peers"`
-	Seed            bool           `help:"seed after download is complete"`
-	Addr            *net.TCPAddr   `help:"network listen addr"`
-	UploadRate      tagflag.Bytes  `help:"max piece bytes to send per second"`
-	DownloadRate    tagflag.Bytes  `help:"max bytes per second down from peers"`
-	Debug           bool
-	PackedBlocklist string
-	Stats           *bool
-	PublicIP        net.IP
-	Progress        bool
-	Quiet           bool `help:"discard client logging"`
+	Mmap              bool           `help:"memory-map torrent data"`
+	TestPeer          []*net.TCPAddr `help:"addresses of some starting peers"`
+	Seed              bool           `help:"seed after download is complete"`
+	Addr              *net.TCPAddr   `help:"network listen addr"`
+	UploadRate        tagflag.Bytes  `help:"max piece bytes to send per second"`
+	DownloadRate      tagflag.Bytes  `help:"max bytes per second down from peers"`
+	Scion             bool           `help:"Whether to enable a SCION transport"`
+	LocalScionAddr    string         `help:"Local SCION address to use"`
+	PeerScionAddrList []string       `help:"List of remote SCION peers to use"`
+	Debug             bool
+	PackedBlocklist   string
+	Stats             *bool
+	PublicIP          net.IP
+	Progress          bool
+	Quiet             bool `help:"discard client logging"`
 	tagflag.StartPos
 	Torrent []string `arity:"+" help:"torrent file path or magnet uri"`
 }{
 	UploadRate:   -1,
 	DownloadRate: -1,
 	Progress:     true,
+	Scion:        false,
 }
 
 func stdoutAndStderrAreSameFile() bool {
@@ -205,6 +211,31 @@ func mainErr() error {
 	}
 	if flags.Quiet {
 		clientConfig.Logger = log.Discard
+	}
+	if flags.Scion {
+		clientConfig.DisableScion = false
+		addr, err := snet.AddrFromString(flags.LocalScionAddr)
+		if err != nil {
+			return err
+		}
+		clientConfig.PublicScionAddr = addr
+		clientConfig.SetScionListenAddr(flags.LocalScionAddr)
+		var peers []*snet.Addr
+		for _, remote := range flags.PeerScionAddrList {
+			peerAddr, err := snet.AddrFromString(remote)
+			if err != nil {
+				fmt.Printf("Failed to parse remote scion addr: %v, %v, ignoring", remote, err)
+				continue
+			}
+			peers = append(peers, peerAddr)
+		}
+		if len(peers) == 0 {
+			fmt.Printf("Warning: Scion was enabled, but no valid remote address was given\n")
+		}
+		clientConfig.RemoteScionAddrs = peers
+		clientConfig.DisableTCP = true
+		clientConfig.DisableUTP = true
+		clientConfig.NoDHT = true
 	}
 
 	client, err := torrent.NewClient(clientConfig)

@@ -66,8 +66,6 @@ type ClientConfig struct {
 	DisableUTP bool
 	// For the bittorrent protocol.
 	DisableTCP bool `long:"disable-tcp"`
-	// For the bittorrent protocol.
-	DisableScion bool
 	// Called to instantiate storage for each added torrent. Builtin backends
 	// are in the storage package. If not set, the "file" implementation is
 	// used.
@@ -127,9 +125,15 @@ type ClientConfig struct {
 
 	// The IP addresses as our peers should see them. May differ from the
 	// local interfaces due to NAT or other network configurations.
-	PublicIp4       net.IP
-	PublicIp6       net.IP
-	PublicScionAddr snet.Addr
+	PublicIp4 net.IP
+	PublicIp6 net.IP
+
+	// Scion Related fields.
+	// At the moment, only a static set of remotes is supported, i.e. no autoconfig
+	// To keep the PoC easy
+	PublicScionAddr  *snet.Addr
+	DisableScion     bool
+	RemoteScionAddrs []*snet.Addr
 
 	DisableAcceptRateLimiting bool
 	// Don't add connections that have the same peer ID as an existing
@@ -147,6 +151,10 @@ func (cfg *ClientConfig) SetListenAddr(addr string) *ClientConfig {
 	expect.Nil(err)
 	cfg.ListenHost = func(string) string { return host }
 	cfg.ListenPort = port
+	return cfg
+}
+func (cfg *ClientConfig) SetScionListenAddr(host string) *ClientConfig {
+	cfg.ListenHost = func(string) string { return host }
 	return cfg
 }
 
@@ -175,6 +183,7 @@ func NewDefaultClientConfig() *ClientConfig {
 		CryptoProvides: mse.AllSupportedCrypto,
 		ListenPort:     42069,
 		Logger:         log.Default,
+		DisableScion:   true,
 	}
 	cc.ConnTracker.SetNoMaxEntries()
 	cc.ConnTracker.Timeout = func(conntrack.Entry) time.Duration { return 0 }
