@@ -75,6 +75,14 @@ func (s *scionSocket) Accept() (net.Conn, error) {
 	}, nil
 }
 
+func (s *scionSocket) Close() error {
+	return s.q.Close()
+}
+
+func (s *scionSocket) Addr() net.Addr {
+	return s.q.Addr()
+}
+
 type squicStreamWrapper struct {
 	quic.Stream
 	local, remote func() net.Addr
