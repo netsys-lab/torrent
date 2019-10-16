@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"io"
 	"os"
 
@@ -18,7 +19,9 @@ func NewClient(cl ClientImpl) *Client {
 }
 
 func (cl Client) OpenTorrent(info *metainfo.Info, infoHash metainfo.Hash) (*Torrent, error) {
+	fmt.Printf("OpenTorrent: %s %v\n", info.Name, infoHash)
 	t, err := cl.ci.OpenTorrent(info, infoHash)
+	fmt.Printf("OpenImpl: %v %v\n", t, err)
 	return &Torrent{t}, err
 }
 

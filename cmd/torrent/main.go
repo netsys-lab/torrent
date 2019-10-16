@@ -31,6 +31,7 @@ import (
 )
 
 var progress = uiprogress.New()
+var ctrlcChan = make(chan struct{})
 
 func torrentBar(t *torrent.Torrent) {
 	bar := progress.AddBar(1)
@@ -135,6 +136,7 @@ var flags = struct {
 	UploadRate        tagflag.Bytes  `help:"max piece bytes to send per second"`
 	DownloadRate      tagflag.Bytes  `help:"max bytes per second down from peers"`
 	Scion             bool           `help:"Whether to enable a SCION transport"`
+	ScionOnly         bool           `help:"Whether to disable TCP/UDP"`
 	LocalScionAddr    string         `help:"Local SCION address to use"`
 	PeerScionAddrList []string       `help:"List of remote SCION peers to use"`
 	Debug             bool
@@ -170,6 +172,7 @@ func exitSignalHandlers(client *torrent.Client) {
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	for {
 		log.Printf("close signal received: %+v", <-c)
+		ctrlcChan <- struct{}{}
 		client.Close()
 	}
 }
@@ -233,9 +236,13 @@ func mainErr() error {
 			fmt.Printf("Warning: Scion was enabled, but no valid remote address was given\n")
 		}
 		clientConfig.RemoteScionAddrs = peers
-		clientConfig.DisableTCP = true
-		clientConfig.DisableUTP = true
-		clientConfig.NoDHT = true
+		clientConfig.DisableAcceptRateLimiting = true
+		clientConfig.DisableTrackers = true
+		if flags.ScionOnly {
+			clientConfig.DisableTCP = true
+			clientConfig.DisableUTP = true
+			clientConfig.NoDHT = true
+		}
 	}
 
 	client, err := torrent.NewClient(clientConfig)
@@ -264,7 +271,10 @@ func mainErr() error {
 	}
 	if flags.Seed {
 		outputStats(client)
-		select {}
+		select {
+		case <-ctrlcChan:
+			break
+		}
 	}
 	outputStats(client)
 	return nil

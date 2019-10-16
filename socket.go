@@ -2,10 +2,11 @@ package torrent
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/url"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/anacrolix/torrent/scion_torrent"
 
@@ -20,7 +21,7 @@ import (
 )
 
 type dialer interface {
-	dial(_ context.Context, addr string) (net.Conn, error)
+	dial(_ context.Context, addr net.Addr) (net.Conn, error)
 }
 
 type socket interface {
@@ -52,19 +53,16 @@ func listen(n network, cfg *ClientConfig, f firewallCallback) (socket, error) {
 }
 
 type scionSocket struct {
-	net.Listener
 	local *snet.Addr
 	q     quic.Listener
 }
 
 func (s *scionSocket) Accept() (net.Conn, error) {
-	x, err := s.q.Accept(context.Background())
+	x, err := s.q.Accept()
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	conn, err := x.OpenStreamSync(ctx)
+	conn, err := x.AcceptStream()
 	if err != nil {
 		return nil, err
 	}
@@ -95,16 +93,30 @@ func (w *squicStreamWrapper) RemoteAddr() net.Addr {
 	return w.remote()
 }
 
-func (s *scionSocket) dial(ctx context.Context, addr string) (net.Conn, error) {
-	snetAddr, err := snet.AddrFromString(addr)
+func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error) {
+	if err := scion_torrent.InitScion(s.local.IA); err != nil {
+		return nil, err
+	}
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return nil, err
+	}
+	snetAddr, ok := addr.(*snet.Addr)
+	if !ok {
+		return nil, errors.New("Invalid scion addr")
+	}
+	str := snetAddr.String()
+	front := str[:strings.LastIndex(str, ":")]
+	newAddr, err := snet.AddrFromString(front)
 	if err != nil {
 		return nil, err
 	}
-	sess, err := squic.DialSCION(nil, s.local, snetAddr, &quic.Config{KeepAlive: true})
+	sess, err := squic.DialSCION(nil, newAddr, snetAddr, &quic.Config{
+		KeepAlive: true,
+	})
 	if err != nil {
 		return nil, err
 	}
-	conn, err := sess.OpenStreamSync(ctx)
+	conn, err := sess.OpenStreamSync()
 	if err != nil {
 		return nil, err
 	}
@@ -116,18 +128,19 @@ func (s *scionSocket) dial(ctx context.Context, addr string) (net.Conn, error) {
 }
 
 func listenScion(address *snet.Addr) (s socket, err error) {
-	if err := scion_torrent.InitSQUICCerts(); err != nil {
-		return nil, err
-	}
 	if err := scion_torrent.InitScion(address.IA); err != nil {
 		return nil, err
 	}
-	scionSocket := &scionSocket{}
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return nil, err
+	}
 	conn, err := squic.ListenSCION(nil, address, &quic.Config{KeepAlive: true})
 	if err != nil {
 		return nil, err
 	}
+	scionSocket := &scionSocket{}
 	scionSocket.q = conn
+	scionSocket.local = address
 	return scionSocket, nil
 }
 
@@ -167,11 +180,12 @@ type tcpSocket struct {
 	d func(ctx context.Context, addr string) (net.Conn, error)
 }
 
-func (me tcpSocket) dial(ctx context.Context, addr string) (net.Conn, error) {
-	return me.d(ctx, addr)
+func (me tcpSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error) {
+	return me.d(ctx, addr.String())
 }
 
 func listenAll(networks []network, config *ClientConfig, f firewallCallback) ([]socket, error) {
+	fmt.Printf("ListenAll: %v", networks)
 	if len(networks) == 0 {
 		return nil, nil
 	}
@@ -239,11 +253,11 @@ type utpSocketSocket struct {
 	d       proxy.Dialer
 }
 
-func (me utpSocketSocket) dial(ctx context.Context, addr string) (conn net.Conn, err error) {
+func (me utpSocketSocket) dial(ctx context.Context, addr net.Addr) (conn net.Conn, err error) {
 	defer perf.ScopeTimerErr(&err)()
 	if me.d != nil {
-		return me.d.Dial(me.network, addr)
+		return me.d.Dial(me.network, addr.String())
 	}
 
-	return me.utpSocket.DialContext(ctx, me.network, addr)
+	return me.utpSocket.DialContext(ctx, me.network, addr.String())
 }

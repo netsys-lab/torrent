@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/url"
 	"os"
 	"sync"
@@ -236,9 +237,11 @@ func (t *Torrent) addPeer(p Peer) {
 	if t.closed.IsSet() {
 		return
 	}
-	if cl.badPeerIPPort(p.IP, p.Port) {
-		torrent.Add("peers not added because of bad addr", 1)
-		return
+	if !p.IsScion {
+		if cl.badPeerIPPort(p.IP, p.Port) {
+			torrent.Add("peers not added because of bad addr", 1)
+			return
+		}
 	}
 	if t.peers.Add(p) {
 		torrent.Add("peers replaced", 1)
@@ -1707,14 +1710,23 @@ func (t *Torrent) initiateConn(peer Peer) {
 	if peer.Id == t.cl.peerID {
 		return
 	}
-	if t.cl.badPeerIPPort(peer.IP, peer.Port) {
+	var addr net.Addr
+	var addrString string
+	if !peer.IsScion {
+		if t.cl.badPeerIPPort(peer.IP, peer.Port) {
+			return
+		}
+		ipp := IpPort{peer.IP, uint16(peer.Port)}
+		addr = &ipPortAddr{ipp}
+		addrString = ipp.String()
+	} else {
+		addr = peer.ScionAddr
+		addrString = addr.String()
+	}
+	if t.addrActive(addrString) {
 		return
 	}
-	addr := IpPort{peer.IP, uint16(peer.Port)}
-	if t.addrActive(addr.String()) {
-		return
-	}
-	t.halfOpen[addr.String()] = peer
+	t.halfOpen[addrString] = peer
 	go t.cl.outgoingConnection(t, addr, peer.Source)
 }
 

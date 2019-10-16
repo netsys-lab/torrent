@@ -3,7 +3,7 @@ package torrent
 import "strings"
 
 var allPeerNetworks = func() (ret []network) {
-	for _, s := range []string{"tcp4", "tcp6", "udp4", "udp6", "scion4"} {
+	for _, s := range []string{"tcp4", "tcp6", "udp4", "udp6", "scion"} {
 		ret = append(ret, parseNetworkString(s))
 	}
 	return

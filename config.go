@@ -154,7 +154,13 @@ func (cfg *ClientConfig) SetListenAddr(addr string) *ClientConfig {
 	return cfg
 }
 func (cfg *ClientConfig) SetScionListenAddr(host string) *ClientConfig {
-	cfg.ListenHost = func(string) string { return host }
+	oldHost := cfg.ListenHost
+	cfg.ListenHost = func(nw string) string {
+		if nw != "scion" {
+			return oldHost(nw)
+		}
+		return host
+	}
 	return cfg
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/google/btree"
+	"github.com/scionproto/scion/go/lib/snet"
 	"golang.org/x/time/rate"
 	"golang.org/x/xerrors"
 
@@ -373,6 +374,7 @@ func (cl *Client) Close() {
 		f()
 	}
 	cl.event.Broadcast()
+	fmt.Printf("Done closing client\n")
 }
 
 func (cl *Client) ipBlockRange(ip net.IP) (r iplist.Range, blocked bool) {
@@ -410,6 +412,9 @@ func (cl *Client) waitAccept() {
 
 func (cl *Client) rejectAccepted(conn net.Conn) bool {
 	ra := conn.RemoteAddr()
+	if ra.Network() == "scion" {
+		return false
+	}
 	rip := missinggo.AddrIP(ra)
 	if cl.config.DisableIPv4Peers && rip.To4() != nil {
 		return true
@@ -455,9 +460,12 @@ func (cl *Client) acceptConnections(l net.Listener) {
 			} else {
 				go cl.incomingConnection(conn)
 			}
-			log.Fmsg("accepted %s connection from %s", conn.RemoteAddr().Network(), conn.RemoteAddr()).AddValue(debugLogValue).Log(cl.logger)
-			torrent.Add(fmt.Sprintf("accepted conn remote IP len=%d", len(missinggo.AddrIP(conn.RemoteAddr()))), 1)
-			torrent.Add(fmt.Sprintf("accepted conn network=%s", conn.RemoteAddr().Network()), 1)
+			remoteAddr := conn.RemoteAddr()
+			log.Fmsg("accepted %s connection from %s", remoteAddr.Network(), remoteAddr.String()).AddValue(debugLogValue).Log(cl.logger)
+			if remoteAddr.Network() != "scion" {
+				torrent.Add(fmt.Sprintf("accepted conn remote IP len=%d", len(missinggo.AddrIP(conn.RemoteAddr()))), 1)
+			}
+			torrent.Add(fmt.Sprintf("accepted conn network=%s", remoteAddr.Network()), 1)
 			torrent.Add(fmt.Sprintf("accepted on %s listener", l.Addr().Network()), 1)
 		}()
 	}
@@ -468,7 +476,7 @@ func (cl *Client) incomingConnection(nc net.Conn) {
 	if tc, ok := nc.(*net.TCPConn); ok {
 		tc.SetLinger(0)
 	}
-	c := cl.newConnection(nc, false, missinggo.IpPortFromNetAddr(nc.RemoteAddr()), nc.RemoteAddr().Network())
+	c := cl.newConnection(nc, false, nc.RemoteAddr())
 	c.Discovery = peerSourceIncoming
 	cl.runReceivedConn(c)
 }
@@ -513,7 +521,7 @@ func (cl *Client) dopplegangerAddr(addr string) bool {
 }
 
 // Returns a connection over UTP or TCP, whichever is first to connect.
-func (cl *Client) dialFirst(ctx context.Context, addr string) (res dialResult) {
+func (cl *Client) dialFirst(ctx context.Context, addr net.Addr) (res dialResult) {
 	{
 		t := perf.NewTimer(perf.CallerName(0))
 		defer func() {
@@ -577,11 +585,11 @@ func (cl *Client) dialFirst(ctx context.Context, addr string) (res dialResult) {
 	return res
 }
 
-func (cl *Client) dialFromSocket(ctx context.Context, s socket, addr string) net.Conn {
+func (cl *Client) dialFromSocket(ctx context.Context, s socket, addr net.Addr) net.Conn {
 	network := s.Addr().Network()
 	cte := cl.config.ConnTracker.Wait(
 		ctx,
-		conntrack.Entry{network, s.Addr().String(), addr},
+		conntrack.Entry{network, s.Addr().String(), addr.String()},
 		"dial torrent client",
 		0,
 	)
@@ -629,8 +637,8 @@ func (cl *Client) noLongerHalfOpen(t *Torrent, addr string) {
 
 // Performs initiator handshakes and returns a connection. Returns nil
 // *connection if no connection for valid reasons.
-func (cl *Client) handshakesConnection(ctx context.Context, nc net.Conn, t *Torrent, encryptHeader bool, remoteAddr IpPort, network string) (c *connection, err error) {
-	c = cl.newConnection(nc, true, remoteAddr, network)
+func (cl *Client) handshakesConnection(ctx context.Context, nc net.Conn, t *Torrent, encryptHeader bool, remoteAddr net.Addr) (c *connection, err error) {
+	c = cl.newConnection(nc, true, remoteAddr)
 	c.headerEncrypted = encryptHeader
 	ctx, cancel := context.WithTimeout(ctx, cl.config.HandshakesTimeout)
 	defer cancel()
@@ -648,14 +656,14 @@ func (cl *Client) handshakesConnection(ctx context.Context, nc net.Conn, t *Torr
 
 // Returns nil connection and nil error if no connection could be established
 // for valid reasons.
-func (cl *Client) establishOutgoingConnEx(t *Torrent, addr IpPort, obfuscatedHeader bool) (*connection, error) {
+func (cl *Client) establishOutgoingConnEx(t *Torrent, addr net.Addr, obfuscatedHeader bool) (*connection, error) {
 	dialCtx, cancel := context.WithTimeout(context.Background(), func() time.Duration {
 		cl.rLock()
 		defer cl.rUnlock()
 		return t.dialTimeout()
 	}())
 	defer cancel()
-	dr := cl.dialFirst(dialCtx, addr.String())
+	dr := cl.dialFirst(dialCtx, addr)
 	nc := dr.Conn
 	if nc == nil {
 		if dialCtx.Err() != nil {
@@ -663,7 +671,7 @@ func (cl *Client) establishOutgoingConnEx(t *Torrent, addr IpPort, obfuscatedHea
 		}
 		return nil, errors.New("dial failed")
 	}
-	c, err := cl.handshakesConnection(context.Background(), nc, t, obfuscatedHeader, addr, dr.Network)
+	c, err := cl.handshakesConnection(context.Background(), nc, t, obfuscatedHeader, addr)
 	if err != nil {
 		nc.Close()
 	}
@@ -672,7 +680,7 @@ func (cl *Client) establishOutgoingConnEx(t *Torrent, addr IpPort, obfuscatedHea
 
 // Returns nil connection and nil error if no connection could be established
 // for valid reasons.
-func (cl *Client) establishOutgoingConn(t *Torrent, addr IpPort) (c *connection, err error) {
+func (cl *Client) establishOutgoingConn(t *Torrent, addr net.Addr) (c *connection, err error) {
 	torrent.Add("establish outgoing connection", 1)
 	obfuscatedHeaderFirst := cl.config.HeaderObfuscationPolicy.Preferred
 	c, err = cl.establishOutgoingConnEx(t, addr, obfuscatedHeaderFirst)
@@ -697,7 +705,7 @@ func (cl *Client) establishOutgoingConn(t *Torrent, addr IpPort) (c *connection,
 
 // Called to dial out and run a connection. The addr we're given is already
 // considered half-open.
-func (cl *Client) outgoingConnection(t *Torrent, addr IpPort, ps peerSource) {
+func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource) {
 	cl.dialRateLimiter.Wait(context.Background())
 	c, err := cl.establishOutgoingConn(t, addr)
 	cl.lock()
@@ -873,7 +881,9 @@ func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 	c.conn.SetWriteDeadline(time.Time{})
 	c.r = deadlineReader{c.conn, c.r}
 	completedHandshakeConnectionFlags.Add(c.connectionFlags(), 1)
-	if connIsIpv6(c.conn) {
+	if c.network == "scion" {
+		torrent.Add("completed handshake over scion", 1)
+	} else if connIsIpv6(c.conn) {
 		torrent.Add("completed handshake over ipv6", 1)
 	}
 	if err := t.addConnection(c); err != nil {
@@ -1015,6 +1025,7 @@ func (cl *Client) badPeerIPPort(ip net.IP, port int) bool {
 
 // Return a Torrent ready for insertion into a Client.
 func (cl *Client) newTorrent(ih metainfo.Hash, specStorage storage.ClientImpl) (t *Torrent) {
+	fmt.Printf("newTorrent: %v %v\n", ih, specStorage)
 	// use provided storage, if provided
 	storageClient := cl.defaultStorage
 	if specStorage != nil {
@@ -1027,6 +1038,9 @@ func (cl *Client) newTorrent(ih metainfo.Hash, specStorage storage.ClientImpl) (
 		peers: prioritizedPeers{
 			om: btree.New(32),
 			getPrio: func(p Peer) peerPriority {
+				if p.IsScion {
+					return 1
+				}
 				return bep40PriorityIgnoreError(cl.publicAddr(p.IP), p.addr())
 			},
 		},
@@ -1095,6 +1109,7 @@ func (cl *Client) AddTorrentInfoHashWithStorage(infoHash metainfo.Hash, specStor
 // Note that any `Storage` defined on the spec will be ignored if the
 // torrent is already present (i.e. `new` return value is `true`)
 func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err error) {
+	cl.logger.Printf("AddTorrentSpec(): %v", spec)
 	t, new = cl.AddTorrentInfoHashWithStorage(spec.InfoHash, spec.Storage)
 	if spec.DisplayName != "" {
 		t.SetDisplayName(spec.DisplayName)
@@ -1111,6 +1126,16 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 		t.setChunkSize(pp.Integer(spec.ChunkSize))
 	}
 	t.addTrackers(spec.Trackers)
+	if !cl.config.DisableScion {
+		var pp []Peer
+		for _, scionRemote := range cl.config.RemoteScionAddrs {
+			pp = append(pp, Peer{
+				IsScion:   true,
+				ScionAddr: scionRemote,
+			})
+		}
+		t.addPeers(pp)
+	}
 	t.maybeNewConns()
 	return
 }
@@ -1225,7 +1250,18 @@ func (cl *Client) banPeerIP(ip net.IP) {
 	cl.badPeerIPs[ip.String()] = struct{}{}
 }
 
-func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr IpPort, network string) (c *connection) {
+func (cl *Client) newConnection(nc net.Conn, outgoing bool, remote net.Addr) (c *connection) {
+	var remoteAddr IpPort
+	var snetAddr *snet.Addr
+	if remote.Network() != "scion" {
+		remoteAddr = missinggo.IpPortFromNetAddr(remote)
+	} else {
+		var ok bool
+		snetAddr, ok = remote.(*snet.Addr)
+		if !ok {
+			panic("network is scion, but no scion addr")
+		}
+	}
 	c = &connection{
 		conn:            nc,
 		outgoing:        outgoing,
@@ -1234,7 +1270,8 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr IpPort, n
 		PeerMaxRequests: 250,
 		writeBuffer:     new(bytes.Buffer),
 		remoteAddr:      remoteAddr,
-		network:         network,
+		network:         remote.Network(),
+		scionAddr:       snetAddr,
 	}
 	c.logger = cl.logger.WithValues(c,
 		log.Debug, // I want messages to default to debug, and can set it here as it's only used by new code
@@ -1247,7 +1284,7 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr IpPort, n
 		l: cl.config.DownloadRateLimiter,
 		r: c.r,
 	}
-	c.logger.Printf("initialized with remote %v over network %v (outgoing=%t)", remoteAddr, network, outgoing)
+	c.logger.Printf("initialized with remote %v over network %v (outgoing=%t)", remoteAddr, remote.Network(), outgoing)
 	return
 }
 

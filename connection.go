@@ -20,6 +20,7 @@ import (
 	"github.com/anacrolix/missinggo/iter"
 	"github.com/anacrolix/missinggo/prioritybitmap"
 	"github.com/pkg/errors"
+	"github.com/scionproto/scion/go/lib/snet"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/mse"
@@ -47,6 +48,7 @@ type connection struct {
 	outgoing   bool
 	network    string
 	remoteAddr IpPort
+	scionAddr  *snet.Addr
 	// The Reader and Writer for this Conn, with hooks installed for stats,
 	// limiting, deadlines etc.
 	w io.Writer
