@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/anacrolix/torrent/scion_torrent"
+
 	quic "github.com/lucas-clemente/quic-go"
 	"github.com/scionproto/scion/go/lib/snet"
 	"github.com/scionproto/scion/go/lib/snet/squic"
@@ -106,6 +108,12 @@ func (s *scionSocket) dial(ctx context.Context, addr string) (net.Conn, error) {
 }
 
 func listenScion(address *snet.Addr) (s socket, err error) {
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return nil, err
+	}
+	if err := scion_torrent.InitScion(address.IA); err != nil {
+		return nil, err
+	}
 	scionSocket := &scionSocket{}
 	conn, err := squic.ListenSCION(nil, address, &quic.Config{KeepAlive: true})
 	if err != nil {
