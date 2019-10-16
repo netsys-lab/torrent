@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/scionproto/scion/go/lib/sciond"
+	"github.com/scionproto/scion/go/lib/spath"
+
 	"github.com/anacrolix/torrent/scion_torrent"
 
 	quic "github.com/lucas-clemente/quic-go"
@@ -100,16 +103,45 @@ func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error)
 	if err := scion_torrent.InitSQUICCerts(); err != nil {
 		return nil, err
 	}
-	snetAddr, ok := addr.(*snet.Addr)
-	if !ok {
+	// Copy the snet addr -> To ensure we won't manipulate the old addr by attaching hops/path
+	snetAddr, err := snet.AddrFromString(addr.String())
+	if err != nil {
 		return nil, errors.New("Invalid scion addr")
 	}
-	str := snetAddr.String()
+	str := s.local.String()
 	front := str[:strings.LastIndex(str, ":")]
 	newAddr, err := snet.AddrFromString(front)
 	if err != nil {
 		return nil, err
 	}
+
+	if !snetAddr.IA.Equal(newAddr.IA) {
+		// query paths from here to there:
+		pathMgr := snet.DefNetwork.PathResolver()
+		pathSet := pathMgr.Query(context.Background(), newAddr.IA, snetAddr.IA, sciond.PathReqFlags{})
+		if len(pathSet) == 0 {
+			return nil, fmt.Errorf("No Paths")
+		}
+		// print all paths. Also pick one path. Here we chose the path with least hops:
+		i := 0
+		minLength, argMinPath := 999, (*sciond.PathReplyEntry)(nil)
+		fmt.Println("Available paths:")
+		for _, path := range pathSet {
+			fmt.Printf("[%2d] %d %s\n", i, len(path.Entry.Path.Interfaces)/2, path.Entry.Path.String())
+			if len(path.Entry.Path.Interfaces) < minLength {
+				minLength = len(path.Entry.Path.Interfaces)
+				argMinPath = path.Entry
+			}
+			i++
+		}
+		fmt.Println("Chosen path:", argMinPath.Path.String())
+		// we need to copy the path to the destination (destination is the whole selected path)
+		snetAddr.Path = spath.New(argMinPath.Path.FwdPath)
+		snetAddr.Path.InitOffsets()
+		snetAddr.NextHop, _ = argMinPath.HostInfo.Overlay()
+		// get a connection object using that path:
+	}
+
 	sess, err := squic.DialSCION(nil, newAddr, snetAddr, &quic.Config{
 		KeepAlive: true,
 	})
