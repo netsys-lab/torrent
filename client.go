@@ -93,7 +93,11 @@ func (cl *Client) PeerID() PeerID {
 
 func (cl *Client) LocalPort() (port int) {
 	cl.eachListener(func(l socket) bool {
-		_port := missinggo.AddrPort(l.Addr())
+		addr := l.Addr()
+		if addr.Network() == "scion" {
+			return true
+		}
+		_port := missinggo.AddrPort(addr)
 		if _port == 0 {
 			panic(l)
 		}
