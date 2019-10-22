@@ -103,11 +103,12 @@ func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error)
 	if err := scion_torrent.InitSQUICCerts(); err != nil {
 		return nil, err
 	}
-	// Copy the snet addr -> To ensure we won't manipulate the old addr by attaching hops/path
-	snetAddr, err := snet.AddrFromString(addr.String())
-	if err != nil {
-		return nil, errors.New("Invalid scion addr")
+	targetAddr, ok := addr.(*snet.Addr)
+	if !ok {
+		return nil, fmt.Errorf("sdial: invalid addr type: %s", addr.String())
 	}
+	// Copy the snet addr -> To ensure we won't manipulate the old addr by attaching hops/path
+	snetAddr := targetAddr.Copy()
 	str := s.local.String()
 	front := str[:strings.LastIndex(str, ":")]
 	newAddr, err := snet.AddrFromString(front)

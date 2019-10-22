@@ -602,6 +602,7 @@ func (cl *Client) dialFromSocket(ctx context.Context, s socket, addr net.Addr) n
 		return nil
 	}
 	c, err := s.dial(ctx, addr)
+	fmt.Printf("err: %v\n", err)
 	// This is a bit optimistic, but it looks non-trivial to thread this through the proxy code. Set
 	// it now in case we close the connection forthwith.
 	if tc, ok := c.(*net.TCPConn); ok {
