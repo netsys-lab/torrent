@@ -48,7 +48,7 @@ type connection struct {
 	outgoing   bool
 	network    string
 	remoteAddr IpPort
-	scionAddr  *snet.Addr
+	scionAddr  *snet.UDPAddr
 	// The Reader and Writer for this Conn, with hooks installed for stats,
 	// limiting, deadlines etc.
 	w io.Writer

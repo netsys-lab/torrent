@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,15 +21,54 @@ import (
 
 	"github.com/anacrolix/envpprof"
 	"github.com/anacrolix/tagflag"
-	humanize "github.com/dustin/go-humanize"
-	"github.com/gosuri/uiprogress"
-	"golang.org/x/time/rate"
-
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/iplist"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	humanize "github.com/dustin/go-humanize"
+	"github.com/gosuri/uiprogress"
+	// "github.com/netsec-ethz/scion-apps/pkg/appnet"
+	"golang.org/x/time/rate"
 )
+
+// mangleSCIONAddr mangles a SCION address string (if it is one) so it can be
+// safely used in the host part of a URL.
+func mangleSCIONAddr(address string) string {
+
+	raddr, err := snet.ParseUDPAddr(address)
+	if err != nil {
+		panic(fmt.Sprintf("mangleSCIONAddr assumes that address is of the form host:port %s", err))
+	}
+
+	// Turn this into [IA,IP]:port format. This is a valid host in a URI, as per
+	// the "IP-literal" case in RFC 3986, §3.2.2.
+	// Unfortunately, this is not currently compatible with snet.ParseUDPAddr,
+	// so this will have to be _unmangled_ before use.
+	mangledAddr := fmt.Sprintf("[%s,%s]", raddr.IA, raddr.Host.IP)
+	if raddr.Host.Port != 0 {
+		mangledAddr += fmt.Sprintf(":%d", raddr.Host.Port)
+	}
+	return mangledAddr
+}
+
+func unmangleSCIONAddr(address string) string {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || port == "" {
+		panic(fmt.Sprintf("unmangleSCIONAddr assumes that address is of the form host:port %s", err))
+	}
+	// brackets are removed from [I-A,IP] part by SplitHostPort, so this can be
+	// parsed with ParseUDPAddr:
+	udpAddr, err := snet.ParseUDPAddr(host)
+	if err != nil {
+		return address
+	}
+	p, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return address
+	}
+	udpAddr.Host.Port = int(p)
+	return udpAddr.String()
+}
 
 var progress = uiprogress.New()
 var ctrlcChan = make(chan struct{})
@@ -217,15 +257,18 @@ func mainErr() error {
 	}
 	if flags.Scion {
 		clientConfig.DisableScion = false
-		addr, err := snet.AddrFromString(flags.LocalScionAddr)
+
+		addr, err := snet.ParseUDPAddr(flags.LocalScionAddr)
 		if err != nil {
 			return err
 		}
 		clientConfig.PublicScionAddr = addr
 		clientConfig.SetScionListenAddr(flags.LocalScionAddr)
-		var peers []*snet.Addr
+		var peers []*snet.UDPAddr
 		for _, remote := range flags.PeerScionAddrList {
-			peerAddr, err := snet.AddrFromString(remote)
+			peerAddr, err := snet.ParseUDPAddr(remote)
+			fmt.Println("PEER ADDR NETWORK:")
+			fmt.Println(peerAddr.Network())
 			if err != nil {
 				fmt.Printf("Failed to parse remote scion addr: %v, %v, ignoring", remote, err)
 				continue
@@ -244,7 +287,7 @@ func mainErr() error {
 			clientConfig.NoDHT = true
 		}
 	}
-
+	fmt.Println("New Client")
 	client, err := torrent.NewClient(clientConfig)
 	if err != nil {
 		return xerrors.Errorf("creating client: %v", err)

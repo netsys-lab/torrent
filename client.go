@@ -543,6 +543,8 @@ func (cl *Client) dialFirst(ctx context.Context, addr net.Addr) (res dialResult)
 		cl.eachListener(func(s socket) bool {
 			func() {
 				network := s.Addr().Network()
+				fmt.Println("GOT NETWORK STRING")
+				fmt.Println(parseNetworkString(network))
 				if !peerNetworkEnabled(parseNetworkString(network), cl.config) {
 					return
 				}
@@ -1134,7 +1136,10 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 				IsScion:   true,
 				ScionAddr: scionRemote,
 			})
+			fmt.Println("ADD SCION ADDR PEER NETWORK")
+			fmt.Println(scionRemote.Network())
 		}
+		fmt.Println(pp)
 		t.addPeers(pp)
 	}
 	t.maybeNewConns()
@@ -1253,12 +1258,12 @@ func (cl *Client) banPeerIP(ip net.IP) {
 
 func (cl *Client) newConnection(nc net.Conn, outgoing bool, remote net.Addr) (c *connection) {
 	var remoteAddr IpPort
-	var snetAddr *snet.Addr
+	var snetAddr *snet.UDPAddr
 	if remote.Network() != "scion" {
 		remoteAddr = missinggo.IpPortFromNetAddr(remote)
 	} else {
 		var ok bool
-		snetAddr, ok = remote.(*snet.Addr)
+		snetAddr, ok = remote.(*snet.UDPAddr)
 		if !ok {
 			panic("network is scion, but no scion addr")
 		}

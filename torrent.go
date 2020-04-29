@@ -1049,6 +1049,8 @@ func (t *Torrent) openNewConns() {
 			return
 		}
 		p := t.peers.PopMax()
+		fmt.Println("OPEN CONNECTION")
+		fmt.Println(p)
 		t.initiateConn(p)
 	}
 }
@@ -1722,6 +1724,9 @@ func (t *Torrent) initiateConn(peer Peer) {
 	} else {
 		addr = peer.ScionAddr
 		addrString = addr.String()
+		fmt.Println("INITIATE SCION CONN PEER")
+		fmt.Println(addr)
+		fmt.Println(addr.Network())
 	}
 	if t.addrActive(addrString) {
 		return

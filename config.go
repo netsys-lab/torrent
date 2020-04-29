@@ -131,9 +131,9 @@ type ClientConfig struct {
 	// Scion Related fields.
 	// At the moment, only a static set of remotes is supported, i.e. no autoconfig
 	// To keep the PoC easy
-	PublicScionAddr  *snet.Addr
+	PublicScionAddr  *snet.UDPAddr
 	DisableScion     bool
-	RemoteScionAddrs []*snet.Addr
+	RemoteScionAddrs []*snet.UDPAddr
 
 	DisableAcceptRateLimiting bool
 	// Don't add connections that have the same peer ID as an existing
@@ -187,7 +187,7 @@ func NewDefaultClientConfig() *ClientConfig {
 		},
 		CryptoSelector: mse.DefaultCryptoSelector,
 		CryptoProvides: mse.AllSupportedCrypto,
-		ListenPort:     42069,
+		ListenPort:     42424,
 		Logger:         log.Default,
 		DisableScion:   true,
 	}
