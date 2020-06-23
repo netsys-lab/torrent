@@ -209,7 +209,7 @@ func (t *Torrent) pieceCompleteUncached(piece pieceIndex) storage.Completion {
 
 // There's a connection to that address already.
 func (t *Torrent) addrActive(addr string) bool {
-	if _, ok := t.halfOpen[addr]; ok {
+	/*if _, ok := t.halfOpen[addr]; ok {
 		return true
 	}
 	for c := range t.conns {
@@ -217,7 +217,7 @@ func (t *Torrent) addrActive(addr string) bool {
 		if ra.String() == addr {
 			return true
 		}
-	}
+	}*/
 	return false
 }
 

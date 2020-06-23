@@ -104,9 +104,9 @@ func (cl *Client) LocalPort() (port int) {
 		}
 		if port == 0 {
 			port = _port
-		} else if port != _port {
+		} /*else if port != _port {
 			panic("mismatched ports")
-		}
+		}*/
 		return true
 	})
 	return
@@ -458,7 +458,10 @@ func (cl *Client) acceptConnections(l net.Listener) {
 				torrent.Add("rejected accepted connections", 1)
 				conn.Close()
 			} else {
-				go cl.incomingConnection(conn)
+				// For performance benchmarks as client, only download from the provided peers
+				if !cl.config.PerformanceBenchmarkClient {
+					go cl.incomingConnection(conn)
+				}
 			}
 			remoteAddr := conn.RemoteAddr()
 			log.Fmsg("accepted %s connection from %s", remoteAddr.Network(), remoteAddr.String()).AddValue(debugLogValue).Log(cl.logger)
@@ -631,9 +634,9 @@ func forgettableDialError(err error) bool {
 }
 
 func (cl *Client) noLongerHalfOpen(t *Torrent, addr string) {
-	if _, ok := t.halfOpen[addr]; !ok {
+	/*if _, ok := t.halfOpen[addr]; !ok {
 		panic("invariant broken")
-	}
+	}*/
 	delete(t.halfOpen, addr)
 	t.openNewConns()
 }
@@ -1142,6 +1145,42 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 		fmt.Println(pp)
 		t.addPeers(pp)
 	}
+
+	if cl.config.TCPOnly {
+		var pp []Peer
+		for _, ta := range cl.config.RemoteTCPAddrs {
+			pp = append(pp, Peer{
+				IP:   ta.IP,
+				Port: ta.Port,
+			})
+			fmt.Println("ADD TCP ADDR PEER NETWORK")
+			fmt.Println(ta.Network())
+		}
+		for _, ta := range pp {
+			fmt.Println(ta.addr())
+		}
+
+		t.addPeers(pp)
+	}
+
+	if cl.config.UDPOnly {
+		var pp []Peer
+		for _, ta := range cl.config.RemoteUDPAddrs {
+			pp = append(pp, Peer{
+				IP:   ta.IP,
+				Port: ta.Port,
+			})
+			fmt.Println("ADD UDP ADDR PEER NETWORK")
+			fmt.Println(pp)
+		}
+		t.addPeers(pp)
+	}
+
+	fmt.Println("PEERS")
+	t.peers.Each(func(peer Peer) {
+		fmt.Println(peer.addr())
+	})
+
 	t.maybeNewConns()
 	return
 }

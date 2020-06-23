@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+
 	// "strings"
 
 	// "github.com/scionproto/scion/go/lib/sciond"
@@ -17,6 +18,7 @@ import (
 
 	quic "github.com/lucas-clemente/quic-go"
 	"github.com/scionproto/scion/go/lib/snet"
+
 	// "github.com/scionproto/scion/go/lib/snet/squic"
 
 	"github.com/anacrolix/missinggo"
@@ -63,11 +65,11 @@ type scionSocket struct {
 }
 
 func (s *scionSocket) Accept() (net.Conn, error) {
-	x, err := s.q.Accept()
+	x, err := s.q.Accept(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	conn, err := x.AcceptStream()
+	conn, err := x.AcceptStream(context.Background())
 	if err != nil {
 		return nil, err
 	}
