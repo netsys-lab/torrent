@@ -152,6 +152,7 @@ func addTorrents(client *torrent.Client) error {
 			return xerrors.Errorf("adding torrent for %q: %w", arg, err)
 		}
 		torrentBar(t)
+
 		t.AddPeers(func() (ret []torrent.Peer) {
 			for _, ta := range flags.TestPeer {
 				ret = append(ret, torrent.Peer{
@@ -191,18 +192,18 @@ var flags = struct {
 	TCPAddrList           []string `help:"List of remote TCP/UDP peers to use"`
 	UDPAddrList           []string `help:"List of remote TCP/UDP peers to use"`
 	MaxConnectionsPerPeer int
+	PClient               bool
+	TcpPort               int
 	AllowDuplicatePaths   bool
-	MaxConnectionsPerPeer: int
-	AllowDuplicatePaths:   bool
 	tagflag.StartPos
 	Torrent []string `arity:"+" help:"torrent file path or magnet uri"`
 }{
-	UploadRate:   -1,
-	DownloadRate: -1,
-	Progress:     true,
-	Scion:        false,
-	MaxConnectionsPerPeer: 1
-	AllowDuplicatePaths:   false
+	UploadRate:            -1,
+	DownloadRate:          -1,
+	Progress:              true,
+	Scion:                 false,
+	MaxConnectionsPerPeer: 1,
+	AllowDuplicatePaths:   false,
 }
 
 func stdoutAndStderrAreSameFile() bool {
@@ -223,6 +224,7 @@ func exitSignalHandlers(client *torrent.Client) {
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	for {
 		log.Printf("close signal received: %+v", <-c)
+		os.Exit(3)
 		ctrlcChan <- struct{}{}
 		client.Close()
 	}
@@ -278,9 +280,24 @@ func mainErr() error {
 		clientConfig.ListenPort = flags.TcpPort
 	}
 
-	if flags.seed {
-		clientConfig.PerformanceBenchmarkClient = true
+	// if !flags.Seed {
+	clientConfig.PerformanceBenchmarkClient = flags.PClient
+	clientConfig.DisableIPv6 = true
+	clientConfig.PerformanceBenchmark = true
+
+	if flags.PClient {
+		clientConfig.NoUpload = true
+		clientConfig.DisableTrackers = true
+		clientConfig.DisablePEX = true
+		clientConfig.NoDHT = true
+	} else {
+		// clientConfig.DisableTrackers = true
+		// clientConfig.DisablePEX = true
+		// clientConfig.NoUpload = true
+		// clientConfig.TorrentPeersHighWater = 1
 	}
+
+	// }
 
 	if flags.Scion {
 		clientConfig.DisableScion = false
@@ -325,12 +342,13 @@ func mainErr() error {
 			clientConfig.DisableTCP = true
 			clientConfig.DisableUTP = true
 			clientConfig.NoDHT = true
+
 		}
 	}
 	if flags.TCPOnly {
 		clientConfig.DisableScion = true
 		clientConfig.DisableUTP = true
-		clientConfig.NoDHT = true
+		//
 		clientConfig.TCPOnly = true
 
 		for _, remote := range flags.TCPAddrList {
@@ -347,7 +365,7 @@ func mainErr() error {
 	if flags.UDPOnly {
 		clientConfig.DisableScion = true
 		clientConfig.DisableTCP = true
-		clientConfig.NoDHT = true
+		// clientConfig.NoDHT = true
 		clientConfig.UDPOnly = true
 
 		fmt.Println("UDP ADDRESSES")
@@ -362,6 +380,13 @@ func mainErr() error {
 			clientConfig.RemoteUDPAddrs = append(clientConfig.RemoteUDPAddrs, addr)
 		}
 	}
+
+	// if clientConfig.PerformanceBenchmarkClient {
+	//	clientConfig.NoDHT = true
+	// clientConfig.NoUpload = true
+	//	clientConfig.DisablePEX = true
+	//	clientConfig.DisableTrackers = true
+	// }
 
 	fmt.Println("New Client")
 	client, err := torrent.NewClient(clientConfig)

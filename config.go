@@ -145,6 +145,7 @@ type ClientConfig struct {
 	// OnQuery hook func
 	DHTOnQuery func(query *krpc.Msg, source net.Addr) (propagate bool)
 
+	PerformanceBenchmark       bool
 	PerformanceBenchmarkClient bool
 	RemoteTCPAddrs             []*net.TCPAddr
 	RemoteUDPAddrs             []*net.UDPAddr

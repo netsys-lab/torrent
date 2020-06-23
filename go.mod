@@ -22,6 +22,7 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/fsnotify/fsnotify v1.4.7
+	github.com/golang/protobuf v1.4.2 // indirect
 	github.com/google/btree v1.0.0
 	github.com/google/gopacket v1.1.17 // indirect
 	github.com/gosuri/uiprogress v0.0.1
@@ -29,20 +30,23 @@ require (
 	github.com/inconshreveable/log15 v0.0.0-20180818164646-67afb5ed74ec // indirect
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/lucas-clemente/aes12 v0.0.0-20171027163421-cd47fb39b79f // indirect
-	github.com/lucas-clemente/quic-go v0.8.0
+	github.com/lucas-clemente/quic-go v0.15.7
 	github.com/lucas-clemente/quic-go-certificates v0.0.0-20160823095156-d2f86524cced // indirect
 	github.com/marten-seemann/qpack v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.4 // indirect
 	github.com/mattn/go-sqlite3 v1.10.0
-	github.com/netsec-ethz/scion-apps v0.1.0
+	github.com/netsec-ethz/scion-apps v0.1.1-0.20200513085729-4ed293127be3
 	github.com/pierrec/xxHash v0.1.5 // indirect
 	github.com/pkg/errors v0.8.2-0.20190227000051-27936f6d90f9
 	github.com/prometheus/client_golang v1.2.0 // indirect
 	github.com/scionproto/scion v0.5.0
 	github.com/stretchr/testify v1.4.0
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
 	golang.org/x/net v0.0.0-20191105084925-a882066a44e0
+	golang.org/x/sys v0.0.0-20200622214017-ed371f2e16b4 // indirect
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4
-	golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7
+	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
+	google.golang.org/protobuf v1.24.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 	gopkg.in/restruct.v1 v1.0.0-20190323193435-3c2afb705f3c // indirect
 	zombiezen.com/go/capnproto2 v2.17.0+incompatible // indirect

@@ -434,6 +434,12 @@ func (cl *Client) rejectAccepted(conn net.Conn) bool {
 func (cl *Client) acceptConnections(l net.Listener) {
 	for {
 		conn, err := l.Accept()
+
+		// For performance benchmarks as client, only download from the provided peers
+		if cl.config.PerformanceBenchmarkClient {
+			return
+		}
+
 		torrent.Add("client listener accepts", 1)
 		conn = pproffd.WrapNetConn(conn)
 		cl.rLock()
@@ -442,6 +448,7 @@ func (cl *Client) acceptConnections(l net.Listener) {
 		if conn != nil {
 			reject = cl.rejectAccepted(conn)
 		}
+
 		cl.rUnlock()
 		if closed {
 			if conn != nil {
@@ -458,10 +465,8 @@ func (cl *Client) acceptConnections(l net.Listener) {
 				torrent.Add("rejected accepted connections", 1)
 				conn.Close()
 			} else {
-				// For performance benchmarks as client, only download from the provided peers
-				if !cl.config.PerformanceBenchmarkClient {
-					go cl.incomingConnection(conn)
-				}
+				go cl.incomingConnection(conn)
+
 			}
 			remoteAddr := conn.RemoteAddr()
 			log.Fmsg("accepted %s connection from %s", remoteAddr.Network(), remoteAddr.String()).AddValue(debugLogValue).Log(cl.logger)
@@ -1131,7 +1136,10 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 	if spec.ChunkSize != 0 {
 		t.setChunkSize(pp.Integer(spec.ChunkSize))
 	}
-	t.addTrackers(spec.Trackers)
+	if !cl.config.PerformanceBenchmark {
+		t.addTrackers(spec.Trackers)
+	}
+
 	if !cl.config.DisableScion {
 		var pp []Peer
 		for _, scionRemote := range cl.config.RemoteScionAddrs {
@@ -1173,6 +1181,11 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 			fmt.Println("ADD UDP ADDR PEER NETWORK")
 			fmt.Println(pp)
 		}
+
+		for _, ta := range pp {
+			fmt.Println(ta.addr())
+		}
+
 		t.addPeers(pp)
 	}
 
@@ -1340,6 +1353,9 @@ func (cl *Client) onDHTAnnouncePeer(ih metainfo.Hash, p dht.Peer) {
 	if t == nil {
 		return
 	}
+	/*if cl.config.PerformanceBenchmark {
+		return
+	}*/
 	t.addPeers([]Peer{{
 		IP:     p.IP,
 		Port:   p.Port,
