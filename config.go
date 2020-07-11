@@ -144,6 +144,16 @@ type ClientConfig struct {
 
 	// OnQuery hook func
 	DHTOnQuery func(query *krpc.Msg, source net.Addr) (propagate bool)
+
+	PerformanceBenchmark       bool
+	PerformanceBenchmarkClient bool
+	RemoteTCPAddrs             []*net.TCPAddr
+	RemoteUDPAddrs             []*net.UDPAddr
+	MaxConnectionsPerPeer      int
+	AllowDuplicatePaths        bool
+	TCPOnly                    bool
+	UDPOnly                    bool
+	ReuseFirstPath             bool
 }
 
 func (cfg *ClientConfig) SetListenAddr(addr string) *ClientConfig {
@@ -185,11 +195,13 @@ func NewDefaultClientConfig() *ClientConfig {
 			Preferred:        true,
 			RequirePreferred: false,
 		},
-		CryptoSelector: mse.DefaultCryptoSelector,
-		CryptoProvides: mse.AllSupportedCrypto,
-		ListenPort:     42424,
-		Logger:         log.Default,
-		DisableScion:   true,
+		CryptoSelector:        mse.DefaultCryptoSelector,
+		CryptoProvides:        mse.AllSupportedCrypto,
+		ListenPort:            42424,
+		Logger:                log.Default,
+		DisableScion:          true,
+		MaxConnectionsPerPeer: 1,
+		AllowDuplicatePaths:   false,
 	}
 	cc.ConnTracker.SetNoMaxEntries()
 	cc.ConnTracker.Timeout = func(conntrack.Entry) time.Duration { return 0 }

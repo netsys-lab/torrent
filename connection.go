@@ -1248,7 +1248,7 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 		var peers Peers
 		peers.AppendFromPex(pexMsg.Added6, pexMsg.Added6Flags)
 		peers.AppendFromPex(pexMsg.Added, pexMsg.AddedFlags)
-		t.addPeers(peers)
+		// t.addPeers(peers)
 		return nil
 	default:
 		return fmt.Errorf("unexpected extended message ID: %v", id)

@@ -104,9 +104,9 @@ func (cl *Client) LocalPort() (port int) {
 		}
 		if port == 0 {
 			port = _port
-		} else if port != _port {
+		} /*else if port != _port {
 			panic("mismatched ports")
-		}
+		}*/
 		return true
 	})
 	return
@@ -434,6 +434,12 @@ func (cl *Client) rejectAccepted(conn net.Conn) bool {
 func (cl *Client) acceptConnections(l net.Listener) {
 	for {
 		conn, err := l.Accept()
+
+		// For performance benchmarks as client, only download from the provided peers
+		if cl.config.PerformanceBenchmarkClient {
+			return
+		}
+
 		torrent.Add("client listener accepts", 1)
 		conn = pproffd.WrapNetConn(conn)
 		cl.rLock()
@@ -442,6 +448,7 @@ func (cl *Client) acceptConnections(l net.Listener) {
 		if conn != nil {
 			reject = cl.rejectAccepted(conn)
 		}
+
 		cl.rUnlock()
 		if closed {
 			if conn != nil {
@@ -459,6 +466,7 @@ func (cl *Client) acceptConnections(l net.Listener) {
 				conn.Close()
 			} else {
 				go cl.incomingConnection(conn)
+
 			}
 			remoteAddr := conn.RemoteAddr()
 			log.Fmsg("accepted %s connection from %s", remoteAddr.Network(), remoteAddr.String()).AddValue(debugLogValue).Log(cl.logger)
@@ -631,9 +639,9 @@ func forgettableDialError(err error) bool {
 }
 
 func (cl *Client) noLongerHalfOpen(t *Torrent, addr string) {
-	if _, ok := t.halfOpen[addr]; !ok {
+	/*if _, ok := t.halfOpen[addr]; !ok {
 		panic("invariant broken")
-	}
+	}*/
 	delete(t.halfOpen, addr)
 	t.openNewConns()
 }
@@ -1128,7 +1136,10 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 	if spec.ChunkSize != 0 {
 		t.setChunkSize(pp.Integer(spec.ChunkSize))
 	}
-	t.addTrackers(spec.Trackers)
+	if !cl.config.PerformanceBenchmark {
+		t.addTrackers(spec.Trackers)
+	}
+
 	if !cl.config.DisableScion {
 		var pp []Peer
 		for _, scionRemote := range cl.config.RemoteScionAddrs {
@@ -1142,6 +1153,47 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 		fmt.Println(pp)
 		t.addPeers(pp)
 	}
+
+	if cl.config.TCPOnly {
+		var pp []Peer
+		for _, ta := range cl.config.RemoteTCPAddrs {
+			pp = append(pp, Peer{
+				IP:   ta.IP,
+				Port: ta.Port,
+			})
+			fmt.Println("ADD TCP ADDR PEER NETWORK")
+			fmt.Println(ta.Network())
+		}
+		for _, ta := range pp {
+			fmt.Println(ta.addr())
+		}
+
+		t.addPeers(pp)
+	}
+
+	if cl.config.UDPOnly {
+		var pp []Peer
+		for _, ta := range cl.config.RemoteUDPAddrs {
+			pp = append(pp, Peer{
+				IP:   ta.IP,
+				Port: ta.Port,
+			})
+			fmt.Println("ADD UDP ADDR PEER NETWORK")
+			fmt.Println(pp)
+		}
+
+		for _, ta := range pp {
+			fmt.Println(ta.addr())
+		}
+
+		t.addPeers(pp)
+	}
+
+	fmt.Println("PEERS")
+	t.peers.Each(func(peer Peer) {
+		fmt.Println(peer.addr())
+	})
+
 	t.maybeNewConns()
 	return
 }
@@ -1301,6 +1353,9 @@ func (cl *Client) onDHTAnnouncePeer(ih metainfo.Hash, p dht.Peer) {
 	if t == nil {
 		return
 	}
+	/*if cl.config.PerformanceBenchmark {
+		return
+	}*/
 	t.addPeers([]Peer{{
 		IP:     p.IP,
 		Port:   p.Port,

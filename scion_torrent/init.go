@@ -16,7 +16,7 @@ var quicInit sync.Once
 var scionInit sync.Once
 var (
 	// Don't verify the server's cert, as we are not using the TLS PKI.
-	TLSCfg = &tls.Config{InsecureSkipVerify: true}
+	TLSCfg = &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"h3"}}
 )
 
 // GetDefaultDispatcher returns the default SCION dispatcher service

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+
 	// "strings"
 
 	// "github.com/scionproto/scion/go/lib/sciond"
@@ -17,6 +18,7 @@ import (
 
 	quic "github.com/lucas-clemente/quic-go"
 	"github.com/scionproto/scion/go/lib/snet"
+
 	// "github.com/scionproto/scion/go/lib/snet/squic"
 
 	"github.com/anacrolix/missinggo"
@@ -63,11 +65,11 @@ type scionSocket struct {
 }
 
 func (s *scionSocket) Accept() (net.Conn, error) {
-	x, err := s.q.Accept()
+	x, err := s.q.Accept(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	conn, err := x.AcceptStream()
+	conn, err := x.AcceptStream(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +154,7 @@ func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error)
 		// get a connection object using that path:
 	}*/
 	fmt.Println("DIAL ADDR")
-	sess, err := appquic.DialAddr(snetAddr, scion_torrent.TLSCfg, &quic.Config{
+	sess, err := appquic.DialAddr(snetAddr, "127.0.0.1:42425", scion_torrent.TLSCfg, &quic.Config{
 		KeepAlive: true,
 	})
 	// sess, err := squic.DialSCION(nil, str, nil, &quic.Config{
@@ -161,7 +163,7 @@ func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := sess.OpenStreamSync()
+	conn, err := sess.OpenStreamSync(context.Background())
 	if err != nil {
 		return nil, err
 	}
