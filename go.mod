@@ -37,14 +37,14 @@ require (
 	github.com/mattn/go-sqlite3 v1.10.0
 	github.com/netsec-ethz/scion-apps v0.1.1-0.20200513085729-4ed293127be3
 	github.com/pierrec/xxHash v0.1.5 // indirect
-	github.com/pkg/errors v0.8.2-0.20190227000051-27936f6d90f9
-	github.com/prometheus/client_golang v1.2.0 // indirect
+	github.com/pkg/errors v0.9.1
+	github.com/prometheus/node_exporter v1.0.1 // indirect
 	github.com/scionproto/scion v0.5.0
 	github.com/stretchr/testify v1.4.0
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
-	golang.org/x/net v0.0.0-20191105084925-a882066a44e0
+	golang.org/x/net v0.0.0-20200513185701-a91f0712d120
 	golang.org/x/sys v0.0.0-20200622214017-ed371f2e16b4 // indirect
-	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4
+	golang.org/x/time v0.0.0-20191024005414-555d28b269f0
 	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 	google.golang.org/protobuf v1.24.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect

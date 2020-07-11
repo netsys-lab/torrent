@@ -193,6 +193,7 @@ var flags = struct {
 	UDPAddrList           []string `help:"List of remote TCP/UDP peers to use"`
 	MaxConnectionsPerPeer int
 	PClient               bool
+	ReuseFirstPath        bool
 	TcpPort               int
 	AllowDuplicatePaths   bool
 	tagflag.StartPos
@@ -204,6 +205,7 @@ var flags = struct {
 	Scion:                 false,
 	MaxConnectionsPerPeer: 1,
 	AllowDuplicatePaths:   false,
+	ReuseFirstPath:        false,
 }
 
 func stdoutAndStderrAreSameFile() bool {
@@ -280,6 +282,8 @@ func mainErr() error {
 		clientConfig.ListenPort = flags.TcpPort
 	}
 
+	clientConfig.ReuseFirstPath = flags.ReuseFirstPath
+
 	// if !flags.Seed {
 	clientConfig.PerformanceBenchmarkClient = flags.PClient
 	clientConfig.DisableIPv6 = true
@@ -328,7 +332,14 @@ func mainErr() error {
 
 			for i := 0; i < numPaths; i++ {
 				pathAddr := torrent.ChoosePath(peerAddr, paths[i])
-				fmt.Printf("Using path %s to scion peer %s\n", paths[i], remote)
+
+				if flags.ReuseFirstPath {
+					pathAddr = torrent.ChoosePath(peerAddr, paths[0])
+					fmt.Printf("Reusing first path %s to scion peer %s\n", paths[0], remote)
+				} else {
+					fmt.Printf("Using path %s to scion peer %s\n", paths[i], remote)
+				}
+
 				peers = append(peers, pathAddr)
 			}
 		}

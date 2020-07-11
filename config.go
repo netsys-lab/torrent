@@ -153,6 +153,7 @@ type ClientConfig struct {
 	AllowDuplicatePaths        bool
 	TCPOnly                    bool
 	UDPOnly                    bool
+	ReuseFirstPath             bool
 }
 
 func (cfg *ClientConfig) SetListenAddr(addr string) *ClientConfig {
