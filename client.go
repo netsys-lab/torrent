@@ -922,7 +922,7 @@ func (cl *Client) sendInitialMessages(conn *connection, torrent *Torrent) {
 						pp.ExtensionNameMetadata: metadataExtendedId,
 					},
 					V:            cl.config.ExtendedHandshakeClientVersion,
-					Reqq:         64, // TODO: Really?
+					Reqq:         128, // TESTCHANGE: 64, TODO: Really?
 					YourIp:       pp.CompactIp(conn.remoteAddr.IP),
 					Encryption:   cl.config.HeaderObfuscationPolicy.Preferred || !cl.config.HeaderObfuscationPolicy.RequirePreferred,
 					Port:         cl.incomingPeerPort(),
@@ -1119,22 +1119,26 @@ func (cl *Client) AddTorrentInfoHashWithStorage(infoHash metainfo.Hash, specStor
 // provides one. Returns new if the torrent wasn't already in the client.
 // Note that any `Storage` defined on the spec will be ignored if the
 // torrent is already present (i.e. `new` return value is `true`)
-func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err error) {
-	cl.logger.Printf("AddTorrentSpec(): %v", spec)
-	t, new = cl.AddTorrentInfoHashWithStorage(spec.InfoHash, spec.Storage)
+func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
+	// cl.logger.Printf("AddTorrentSpec(): %v", spec) TODO: Add torrent spec
+	t, new := cl.AddTorrentInfoHashWithStorage(spec.InfoHash, spec.Storage)
+	fmt.Printf("NEW TORR DEBUG DEBUG %s\n", t)
 	if spec.DisplayName != "" {
 		t.SetDisplayName(spec.DisplayName)
 	}
 	if spec.InfoBytes != nil {
-		err = t.SetInfoBytes(spec.InfoBytes)
+		err := t.SetInfoBytes(spec.InfoBytes)
 		if err != nil {
-			return
+			return nil, false, err
 		}
 	}
 	cl.lock()
 	defer cl.unlock()
+	fmt.Printf("CHUNK SIZE %d", spec.ChunkSize)
 	if spec.ChunkSize != 0 {
 		t.setChunkSize(pp.Integer(spec.ChunkSize))
+	} else {
+		t.setChunkSize(pp.Integer(1024))
 	}
 	if !cl.config.PerformanceBenchmark {
 		t.addTrackers(spec.Trackers)
@@ -1195,7 +1199,7 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 	})
 
 	t.maybeNewConns()
-	return
+	return t, new, nil
 }
 
 func (cl *Client) dropTorrent(infoHash metainfo.Hash) (err error) {
@@ -1263,6 +1267,7 @@ func (cl *Client) AddMagnet(uri string) (T *Torrent, err error) {
 
 func (cl *Client) AddTorrent(mi *metainfo.MetaInfo) (T *Torrent, err error) {
 	T, _, err = cl.AddTorrentSpec(TorrentSpecFromMetaInfo(mi))
+
 	var ss []string
 	slices.MakeInto(&ss, mi.Nodes)
 	cl.AddDHTNodes(ss)

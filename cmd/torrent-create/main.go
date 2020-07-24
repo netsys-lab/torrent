@@ -24,6 +24,7 @@ func main() {
 		AnnounceList      []string `name:"a" help:"extra announce-list tier entry"`
 		EmptyAnnounceList bool     `name:"n" help:"exclude default announce-list entries"`
 		Comment           string   `name:"t" help:"comment"`
+		PieceSize         int64    `name:"p" help:"pieceSize in KB"`
 		CreatedBy         string   `name:"c" help:"created by"`
 		tagflag.StartPos
 		Root string
@@ -47,6 +48,12 @@ func main() {
 	}
 	info := metainfo.Info{
 		PieceLength: 256 * 1024,
+	}
+
+	if args.PieceSize > 0 {
+		info = metainfo.Info{
+			PieceLength: args.PieceSize * 1024,
+		}
 	}
 	err := info.BuildFromFilePath(args.Root)
 	if err != nil {

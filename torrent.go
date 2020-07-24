@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"sort"
 	"sync"
 	"text/tabwriter"
 	"time"
@@ -1520,6 +1521,33 @@ func (t *Torrent) SetMaxEstablishedConns(max int) (oldMax int) {
 	return oldMax
 }
 
+func (t *Torrent) conRacing() {
+	var raceAfterChunks int64 = 1000
+	useConns := 1
+	log.Printf("CONRACING, %d \n", t.stats.ChunksRead.n)
+	if t.stats.ChunksRead.n >= raceAfterChunks {
+		log.Printf("Reached %d pieces, apply conRacing\n", raceAfterChunks)
+		cons := t.unclosedConnsAsSlice()
+
+		// TODO: Test with ChunksRead etc
+		sort.Slice(cons, func(i, j int) bool {
+			return cons[i].stats.ChunksRead.n < cons[j].stats.ChunksRead.n
+		})
+
+		for i, c := range cons {
+			if i >= useConns {
+				log.Printf("Choking con %s", c)
+				c.Choke(func(msg pp.Message) bool {
+					c.wroteMsg(&msg)
+					c.writeBuffer.Write(msg.MustMarshalBinary())
+					torrent.Add(fmt.Sprintf("messages filled of type %s", msg.Type.String()), 1)
+					return c.writeBuffer.Len() < 1<<16 // 64KiB
+				})
+			}
+		}
+	}
+}
+
 func (t *Torrent) pieceHashed(piece pieceIndex, correct bool) {
 	t.logger.Log(log.Fstr("hashed piece %d (passed=%t)", piece, correct).WithValues(debugLogValue))
 	p := t.piece(piece)
@@ -1544,6 +1572,7 @@ func (t *Torrent) pieceHashed(piece pieceIndex, correct bool) {
 			// Don't increment stats above connection-level for every involved
 			// connection.
 			t.allStats((*ConnStats).incrementPiecesDirtiedGood)
+			// t.conRacing()
 		}
 		for _, c := range touchers {
 			c.stats.incrementPiecesDirtiedGood()

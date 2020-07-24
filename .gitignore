@@ -1,3 +1,7 @@
 .torrent.bolt.db
 
 cmd/benchtorrent/benchtorrent
+cmd/torrent-create/test.zip
+cmd/torrent-create/torrent-create
+cmd/torrent-magnet/torrent-magnet
+*.torrent
