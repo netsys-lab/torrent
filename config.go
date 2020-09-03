@@ -134,6 +134,7 @@ type ClientConfig struct {
 	PublicScionAddr  *snet.UDPAddr
 	DisableScion     bool
 	RemoteScionAddrs []*snet.UDPAddr
+	RemoteScionPaths []*snet.Path
 
 	DisableAcceptRateLimiting bool
 	// Don't add connections that have the same peer ID as an existing

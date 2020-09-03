@@ -322,6 +322,7 @@ func mainErr() error {
 		clientConfig.PublicScionAddr = addr
 		clientConfig.SetScionListenAddr(flags.LocalScionAddr)
 		var peers []*snet.UDPAddr
+		var sPaths []*snet.Path
 		for _, remote := range flags.PeerScionAddrList {
 			peerAddr, err := snet.ParseUDPAddr(remote)
 			if err != nil {
@@ -351,12 +352,14 @@ func mainErr() error {
 				}
 
 				peers = append(peers, pathAddr)
+				sPaths = append(sPaths, &paths[i])
 			}
 		}
 		if len(peers) == 0 {
 			fmt.Printf("Warning: Scion was enabled, but no valid remote address was given\n")
 		}
 		clientConfig.RemoteScionAddrs = peers
+		clientConfig.RemoteScionPaths = sPaths
 		clientConfig.DisableAcceptRateLimiting = true
 		clientConfig.DisableTrackers = true
 		if flags.ScionOnly {
@@ -435,6 +438,7 @@ func mainErr() error {
 		elapsed := time.Since(start)
 		log.Printf("Binomial took %s", elapsed)
 		log.Print("downloaded ALL the torrents")
+
 	} else {
 		return xerrors.New("y u no complete torrents?!")
 	}

@@ -40,15 +40,19 @@ const (
 // Maintains the state of a connection with a peer.
 type connection struct {
 	// First to ensure 64-bit alignment for atomics. See #262.
-	stats ConnStats
-
-	t *Torrent
+	stats                ConnStats
+	BytesReadOverTime    map[int64]int64
+	BytesWrittenOverTime map[int64]int64
+	TimeInterval         int64
+	Ticker               *time.Ticker
+	t                    *Torrent
 	// The actual Conn, used for closing, and setting socket options.
 	conn       net.Conn
 	outgoing   bool
 	network    string
 	remoteAddr IpPort
 	scionAddr  *snet.UDPAddr
+	scionPath  *snet.Path
 	// The Reader and Writer for this Conn, with hooks installed for stats,
 	// limiting, deadlines etc.
 	w io.Writer
@@ -304,6 +308,7 @@ func (cn *connection) WriteStatus(w io.Writer, t *Torrent) {
 		cn.statusFlags(),
 		cn.downloadRate()/(1<<10),
 	)
+
 	fmt.Fprintf(w, "    next pieces: %v%s\n",
 		iter.ToSlice(iter.Head(10, cn.iterPendingPiecesUntyped)),
 		func() string {
@@ -313,6 +318,33 @@ func (cn *connection) WriteStatus(w io.Writer, t *Torrent) {
 				return ""
 			}
 		}())
+
+	fmt.Println("-----------------------------------")
+	if cn.network == "scion" {
+		fmt.Println("SCION Connection")
+
+		if cn.scionPath != nil {
+			fmt.Println("SCION PATH AVAILABLE")
+			fmt.Println((*(cn.scionPath)).Interfaces())
+		}
+	}
+	fmt.Println("Bytes read over Time")
+	fmt.Println(cn.BytesReadOverTime)
+	fmt.Println("Bytes written over Time")
+	fmt.Println(cn.BytesWrittenOverTime)
+
+	for key, value := range cn.BytesReadOverTime {
+		cn.BytesReadOverTime[key] = (value / 1000 / 1000) * 8
+	}
+	for key, value := range cn.BytesWrittenOverTime {
+		cn.BytesWrittenOverTime[key] = (value / 1000 / 1000) * 8
+	}
+
+	fmt.Println("Mbit read over Time")
+	fmt.Println(cn.BytesReadOverTime)
+	fmt.Println("Mbit written over Time")
+	fmt.Println(cn.BytesWrittenOverTime)
+	fmt.Println("-----------------------------------")
 }
 
 func (cn *connection) Close() {
@@ -1087,6 +1119,31 @@ func (c *connection) mainReadLoop() (err error) {
 	}()
 	t := c.t
 	cl := t.cl
+	var interval int64
+	interval = 0
+	c.BytesReadOverTime[interval] = 0
+	c.BytesWrittenOverTime[interval] = 0
+	var lastReadBytes int64
+	lastReadBytes = 0
+	var lastWrittenBytes int64
+	lastWrittenBytes = 0
+	c.Ticker = time.NewTicker(time.Duration(c.TimeInterval) * time.Millisecond)
+	done := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-c.Ticker.C:
+				interval += c.TimeInterval
+				// log.Printf("Set brot with bytesread %d - %d \n", c.stats.BytesRead.n, lastReadBytes)
+				c.BytesReadOverTime[interval] = c.stats.BytesRead.n - lastReadBytes
+				c.BytesWrittenOverTime[interval] = c.stats.BytesWritten.n - lastWrittenBytes
+				lastReadBytes = c.stats.BytesRead.n
+				lastWrittenBytes = c.stats.BytesWritten.n
+			}
+		}
+	}()
 
 	decoder := pp.Decoder{
 		R:         bufio.NewReaderSize(c.r, 1<<17), //TMPCHANGE 17
@@ -1101,9 +1158,13 @@ func (c *connection) mainReadLoop() (err error) {
 			err = decoder.Decode(&msg)
 		}()
 		if t.closed.IsSet() || c.closed.IsSet() || err == io.EOF {
+			c.Ticker.Stop()
+			done <- true
 			return nil
 		}
 		if err != nil {
+			c.Ticker.Stop()
+			done <- true
 			return err
 		}
 		c.readMsg(&msg)
@@ -1186,6 +1247,8 @@ func (c *connection) mainReadLoop() (err error) {
 			err = fmt.Errorf("received unknown message type: %#v", msg.Type)
 		}
 		if err != nil {
+			c.Ticker.Stop()
+			done <- true
 			return err
 		}
 	}

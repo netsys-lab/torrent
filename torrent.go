@@ -1060,6 +1060,19 @@ func (t *Torrent) openNewConns() {
 		p := t.peers.PopMax()
 		fmt.Println("OPEN CONNECTION")
 		fmt.Println(p)
+
+		fmt.Println("-.--.--.--.--.--.-")
+		if p.IsScion {
+			fmt.Println("SCION PEER")
+			p, err := p.ScionAddr.GetPath()
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				fmt.Println(p)
+				fmt.Println(p.Interfaces())
+			}
+		}
+		fmt.Println("-.--.--.--.--.--.-")
 		t.initiateConn(p)
 	}
 }
@@ -1772,7 +1785,7 @@ func (t *Torrent) initiateConn(peer Peer) {
 		return
 	}
 	t.halfOpen[addrString] = peer
-	go t.cl.outgoingConnection(t, addr, peer.Source)
+	go t.cl.outgoingConnection(t, addr, peer.Source, peer.ScionPath)
 }
 
 func (t *Torrent) AddClientPeer(cl *Client) {

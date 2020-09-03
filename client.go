@@ -54,9 +54,9 @@ type Client struct {
 	event  sync.Cond
 	closed missinggo.Event
 
-	config *ClientConfig
-	logger log.Logger
-
+	config         *ClientConfig
+	logger         log.Logger
+	connections    []*connection
 	peerID         PeerID
 	defaultStorage *storage.Client
 	onClose        []func()
@@ -78,6 +78,10 @@ type Client struct {
 }
 
 type ipStr string
+
+func (cl *Client) GetConns() []*connection {
+	return cl.connections
+}
 
 func (cl *Client) BadPeerIPs() []string {
 	cl.rLock()
@@ -191,6 +195,7 @@ func NewClient(cfg *ClientConfig) (cl *Client, err error) {
 		dopplegangerAddrs: make(map[string]struct{}),
 		torrents:          make(map[metainfo.Hash]*Torrent),
 		dialRateLimiter:   rate.NewLimiter(10, 10),
+		connections:       make([]*connection, 20),
 	}
 	go cl.acceptLimitClearer()
 	cl.initLogger()
@@ -717,9 +722,16 @@ func (cl *Client) establishOutgoingConn(t *Torrent, addr net.Addr) (c *connectio
 
 // Called to dial out and run a connection. The addr we're given is already
 // considered half-open.
-func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource) {
+func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource, scionPath *snet.Path) {
 	cl.dialRateLimiter.Wait(context.Background())
 	c, err := cl.establishOutgoingConn(t, addr)
+
+	if scionPath != nil {
+		fmt.Println("SET SCION PATH")
+		fmt.Println((*scionPath).Interfaces())
+		c.scionPath = scionPath
+	}
+
 	cl.lock()
 	defer cl.unlock()
 	// Don't release lock between here and addConnection, unless it's for
@@ -906,6 +918,7 @@ func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 	defer t.dropConnection(c)
 	go c.writer(time.Minute)
 	cl.sendInitialMessages(c, t)
+	cl.connections = append(cl.connections, c)
 	err := c.mainReadLoop()
 	if err != nil && cl.config.Debug {
 		cl.logger.Printf("error during connection main read loop: %s", err)
@@ -1149,10 +1162,11 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
 
 	if !cl.config.DisableScion {
 		var pp []Peer
-		for _, scionRemote := range cl.config.RemoteScionAddrs {
+		for i, scionRemote := range cl.config.RemoteScionAddrs {
 			pp = append(pp, Peer{
 				IsScion:   true,
 				ScionAddr: scionRemote,
+				ScionPath: cl.config.RemoteScionPaths[i],
 			})
 			fmt.Println("ADD SCION ADDR PEER NETWORK")
 			fmt.Println(scionRemote.Network())
@@ -1341,15 +1355,18 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remote net.Addr) (c 
 	}*/
 
 	c = &connection{
-		conn:            nc,
-		outgoing:        outgoing,
-		Choked:          true,
-		PeerChoked:      true,
-		PeerMaxRequests: cl.config.MaxRequestsPerPeer,
-		writeBuffer:     new(bytes.Buffer),
-		remoteAddr:      remoteAddr,
-		network:         remote.Network(),
-		scionAddr:       snetAddr,
+		conn:                 nc,
+		outgoing:             outgoing,
+		Choked:               true,
+		PeerChoked:           true,
+		PeerMaxRequests:      cl.config.MaxRequestsPerPeer,
+		writeBuffer:          new(bytes.Buffer),
+		remoteAddr:           remoteAddr,
+		network:              remote.Network(),
+		scionAddr:            snetAddr,
+		TimeInterval:         1000,
+		BytesReadOverTime:    make(map[int64]int64),
+		BytesWrittenOverTime: make(map[int64]int64),
 	}
 	c.logger = cl.logger.WithValues(c,
 		log.Debug, // I want messages to default to debug, and can set it here as it's only used by new code
