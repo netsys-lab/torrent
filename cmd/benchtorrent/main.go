@@ -152,7 +152,7 @@ func addTorrents(client *torrent.Client) error {
 			log.Printf("RECEIVED TORRERR %s\n", err)
 			return xerrors.Errorf("adding torrent for %q: %w", arg, err)
 		}
-		torrentBar(t)
+		// torrentBar(t)
 
 		t.AddPeers(func() (ret []torrent.Peer) {
 			for _, ta := range flags.TestPeer {
@@ -193,6 +193,7 @@ var flags = struct {
 	TCPAddrList           []string `help:"List of remote TCP/UDP peers to use"`
 	UDPAddrList           []string `help:"List of remote TCP/UDP peers to use"`
 	MaxConnectionsPerPeer int
+	MaxRequestsPerPeer    int
 	PClient               bool
 	ReuseFirstPath        bool
 	TcpPort               int
@@ -207,6 +208,7 @@ var flags = struct {
 	MaxConnectionsPerPeer: 1,
 	AllowDuplicatePaths:   false,
 	ReuseFirstPath:        false,
+	MaxRequestsPerPeer:    250,
 }
 
 func stdoutAndStderrAreSameFile() bool {
@@ -257,16 +259,18 @@ func mainErr() error {
 		clientConfig.IPBlocklist = blocklist
 	}
 	if flags.Mmap {
-		clientConfig.DefaultStorage = storage.NewMMap("")
+		// clientConfig.DefaultStorage = storage.NewBoltDB("tmp")
+		clientConfig.DefaultStorage = storage.NewMMap("tmp")
+		// clientConfig.DefaultStorage = storage.NewFileByInfoHash("tmp")
 	}
 	if flags.Addr != nil {
 		clientConfig.SetListenAddr(flags.Addr.String())
 	}
 	if flags.UploadRate != -1 {
-		clientConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(flags.UploadRate), 256<<10)
+		clientConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(flags.UploadRate), 256<<10) // TMPCHANGE 10
 	}
 	if flags.DownloadRate != -1 {
-		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(flags.DownloadRate), 1<<20)
+		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(flags.DownloadRate), 1<<20) // TMPCHANGE 20
 	}
 	if flags.Quiet {
 		clientConfig.Logger = log.Discard
@@ -281,6 +285,10 @@ func mainErr() error {
 
 	if flags.TcpPort > 0 {
 		clientConfig.ListenPort = flags.TcpPort
+	}
+
+	if flags.MaxRequestsPerPeer > 0 {
+		clientConfig.MaxRequestsPerPeer = flags.MaxRequestsPerPeer
 	}
 
 	clientConfig.ReuseFirstPath = flags.ReuseFirstPath
@@ -303,7 +311,7 @@ func mainErr() error {
 	}
 
 	// }
-
+	clientConfig.DisableAcceptRateLimiting = true
 	if flags.Scion {
 		clientConfig.DisableScion = false
 
@@ -339,6 +347,7 @@ func mainErr() error {
 					fmt.Printf("Reusing first path %s to scion peer %s\n", paths[0], remote)
 				} else {
 					fmt.Printf("Using path %s to scion peer %s\n", paths[i], remote)
+					fmt.Printf("Fingerprint %s", paths[i].Fingerprint())
 				}
 
 				peers = append(peers, pathAddr)
@@ -369,9 +378,10 @@ func mainErr() error {
 				fmt.Printf("Failed to parse remote tcp addr: %v, %v, ignoring\n", remote, err)
 				continue
 			}
-
 			clientConfig.RemoteTCPAddrs = append(clientConfig.RemoteTCPAddrs, addr)
+
 		}
+		fmt.Println(clientConfig.RemoteTCPAddrs)
 	}
 
 	if flags.UDPOnly {

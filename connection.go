@@ -402,9 +402,11 @@ func (cn *connection) nominalMaxRequests() (ret int) {
 	}
 	return int(clamp(
 		1,
+		// cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
 		int64(cn.PeerMaxRequests),
 		max(64,
-			cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()))))
+			int64(cn.PeerMaxRequests)))) // TODO: TMP CHANGE
+	// cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()))))
 }
 
 func (cn *connection) totalExpectingTime() (ret time.Duration) {
@@ -585,8 +587,10 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 			// If we didn't completely top up the requests, we shouldn't mark
 			// the low water, since we'll want to top up the requests as soon
 			// as we have more write buffer space.
+			// fmt.Printf("COULD NOT FILL UP BUFFER \n")
 			return
 		}
+		// fmt.Printf("FILL LOWWATER TO %d", len(cn.requests)/2)
 		cn.requestsLowWater = len(cn.requests) / 2
 	}
 
@@ -623,7 +627,7 @@ func (cn *connection) writer(keepAliveTimeout time.Duration) {
 				cn.wroteMsg(&msg)
 				cn.writeBuffer.Write(msg.MustMarshalBinary())
 				torrent.Add(fmt.Sprintf("messages filled of type %s", msg.Type.String()), 1)
-				return cn.writeBuffer.Len() < 1<<16 // 64KiB
+				return cn.writeBuffer.Len() < 1<<16 // TMPCHANGE 16 64KiB
 			})
 		}
 		if cn.writeBuffer.Len() == 0 && time.Since(lastWrite) >= keepAliveTimeout {
@@ -1085,7 +1089,7 @@ func (c *connection) mainReadLoop() (err error) {
 	cl := t.cl
 
 	decoder := pp.Decoder{
-		R:         bufio.NewReaderSize(c.r, 1<<17),
+		R:         bufio.NewReaderSize(c.r, 1<<17), //TMPCHANGE 17
 		MaxLength: 256 * 1024,
 		Pool:      t.chunkPool,
 	}
@@ -1207,9 +1211,10 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 			c.t.logger.Printf("error parsing extended handshake message %q: %s", payload, err)
 			return errors.Wrap(err, "unmarshalling extended handshake payload")
 		}
-		if d.Reqq != 0 {
-			c.PeerMaxRequests = d.Reqq
-		}
+		// if d.Reqq != 0 {
+		//	fmt.Printf("SET MAXREQUESTS TO %d\n\n", d.Reqq)
+		//	c.PeerMaxRequests = d.Reqq
+		// }
 		c.PeerClientName = d.V
 		if c.PeerExtensionIDs == nil {
 			c.PeerExtensionIDs = make(map[pp.ExtensionName]pp.ExtensionNumber, len(d.M))
@@ -1225,6 +1230,11 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 				return errors.Wrapf(err, "setting metadata size to %d", d.MetadataSize)
 			}
 		}
+		fmt.Println("HANDSHOOK CONN")
+		fmt.Println(c.remoteAddr)
+		path, _ := c.scionAddr.GetPath()
+		fmt.Printf("%s\n", c.scionAddr.String())
+		fmt.Printf("%s\n", path.Fingerprint())
 		c.requestPendingMetadata()
 		return nil
 	case metadataExtendedId:
@@ -1527,6 +1537,7 @@ func (c *connection) sendChunk(r request, msg func(pp.Message) bool) (more bool,
 	// Count the chunk being sent, even if it isn't.
 	b := make([]byte, r.Length)
 	p := c.t.info.Piece(int(r.Index))
+	fmt.Println("SEND CHUNK")
 	n, err := c.t.readAt(b, p.Offset()+int64(r.Begin))
 	if n != len(b) {
 		if err == nil {

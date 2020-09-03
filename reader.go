@@ -216,6 +216,7 @@ func (r *reader) readOnceAt(b []byte, pos int64, ctxErr *error) (n int, err erro
 		ip := r.t.info.Piece(pi)
 		po := r.torrentOffset(pos) % r.t.info.PieceLength
 		b1 := missinggo.LimitLen(b, ip.Length()-po, avail)
+
 		n, err = r.t.readAt(b1, r.torrentOffset(pos))
 		if n != 0 {
 			err = nil

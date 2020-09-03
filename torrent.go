@@ -753,9 +753,17 @@ func (t *Torrent) hashPiece(piece pieceIndex) (ret metainfo.Hash) {
 	p.waitNoPendingWrites()
 	ip := t.info.Piece(int(piece))
 	pl := ip.Length()
+
+	// TMPCHANGE
+	// n := pl
+	// err := nil
+	// _, err := hash.Write(p.hash.Bytes())
+	// n := pl
+	// n, err := io.Copy(hash, *p.hash, 0, pl)
 	n, err := io.Copy(hash, io.NewSectionReader(t.pieces[piece].Storage(), 0, pl))
-	if n == pl {
-		missinggo.CopyExact(&ret, hash.Sum(nil))
+	if int64(n) == pl {
+		// fmt.Println("COPY EXACT...")
+		missinggo.CopyExact(&ret, p.hash) //hash.Sum(nil))
 		return
 	}
 	if err != io.ErrUnexpectedEOF && !os.IsNotExist(err) {
@@ -1652,7 +1660,7 @@ func (t *Torrent) onIncompletePiece(piece pieceIndex) {
 }
 
 func (t *Torrent) tryCreateMorePieceHashers() {
-	for t.activePieceHashes < 2 && t.tryCreatePieceHasher() {
+	for t.activePieceHashes < 2 && t.tryCreatePieceHasher() { //TMPCHANGE 2
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mrand "math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -876,6 +877,7 @@ func (cl *Client) runReceivedConn(c *connection) {
 
 func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 	c.setTorrent(t)
+	fmt.Println("GOT HANDSHAKE CONN")
 	if c.PeerID == cl.peerID {
 		if c.outgoing {
 			connsToSelf.Add(1)
@@ -922,7 +924,7 @@ func (cl *Client) sendInitialMessages(conn *connection, torrent *Torrent) {
 						pp.ExtensionNameMetadata: metadataExtendedId,
 					},
 					V:            cl.config.ExtendedHandshakeClientVersion,
-					Reqq:         128, // TESTCHANGE: 64, TODO: Really?
+					Reqq:         64, // TESTCHANGE: 64, TODO: Really?
 					YourIp:       pp.CompactIp(conn.remoteAddr.IP),
 					Encryption:   cl.config.HeaderObfuscationPolicy.Preferred || !cl.config.HeaderObfuscationPolicy.RequirePreferred,
 					Port:         cl.incomingPeerPort(),
@@ -1049,10 +1051,13 @@ func (cl *Client) newTorrent(ih metainfo.Hash, specStorage storage.ClientImpl) (
 		peers: prioritizedPeers{
 			om: btree.New(32),
 			getPrio: func(p Peer) peerPriority {
-				if p.IsScion {
+				// TODO: TMP CHANGE
+				// return 1
+				return uint32(p.Port) + uint32(mrand.Intn(100))
+				/*if p.IsScion {
 					return 1
 				}
-				return bep40PriorityIgnoreError(cl.publicAddr(p.IP), p.addr())
+				return bep40PriorityIgnoreError(cl.publicAddr(p.IP), p.addr())*/
 			},
 		},
 		conns: make(map[*connection]struct{}, 2*cl.config.EstablishedConnsPerTorrent),
@@ -1137,8 +1142,6 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
 	fmt.Printf("CHUNK SIZE %d", spec.ChunkSize)
 	if spec.ChunkSize != 0 {
 		t.setChunkSize(pp.Integer(spec.ChunkSize))
-	} else {
-		t.setChunkSize(pp.Integer(1024))
 	}
 	if !cl.config.PerformanceBenchmark {
 		t.addTrackers(spec.Trackers)
@@ -1161,12 +1164,15 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
 	if cl.config.TCPOnly {
 		var pp []Peer
 		for _, ta := range cl.config.RemoteTCPAddrs {
-			pp = append(pp, Peer{
-				IP:   ta.IP,
-				Port: ta.Port,
-			})
-			fmt.Println("ADD TCP ADDR PEER NETWORK")
-			fmt.Println(ta.Network())
+			fmt.Printf("MAXCONPERPEER %d\n", cl.config.MaxConnectionsPerPeer)
+			for i := 0; i < cl.config.MaxConnectionsPerPeer; i++ {
+				pp = append(pp, Peer{
+					IP:   ta.IP,
+					Port: ta.Port,
+				})
+				fmt.Println("ADD TCP ADDR PEER NETWORK")
+				fmt.Println(ta.Network())
+			}
 		}
 		for _, ta := range pp {
 			fmt.Println(ta.addr())
@@ -1325,12 +1331,21 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remote net.Addr) (c 
 			panic("network is scion, but no scion addr")
 		}
 	}
+
+	/*if cl.config.TCPOnly && cl.config.PerformanceBenchmarkClient {
+		maxReq = 10000
+	}
+
+	if cl.config.UDPOnly && cl.config.PerformanceBenchmarkClient {
+		maxReq = 1000
+	}*/
+
 	c = &connection{
 		conn:            nc,
 		outgoing:        outgoing,
 		Choked:          true,
 		PeerChoked:      true,
-		PeerMaxRequests: 250,
+		PeerMaxRequests: cl.config.MaxRequestsPerPeer,
 		writeBuffer:     new(bytes.Buffer),
 		remoteAddr:      remoteAddr,
 		network:         remote.Network(),

@@ -154,6 +154,7 @@ type ClientConfig struct {
 	TCPOnly                    bool
 	UDPOnly                    bool
 	ReuseFirstPath             bool
+	MaxRequestsPerPeer         int
 }
 
 func (cfg *ClientConfig) SetListenAddr(addr string) *ClientConfig {
@@ -202,6 +203,7 @@ func NewDefaultClientConfig() *ClientConfig {
 		DisableScion:          true,
 		MaxConnectionsPerPeer: 1,
 		AllowDuplicatePaths:   false,
+		MaxRequestsPerPeer:    250,
 	}
 	cc.ConnTracker.SetNoMaxEntries()
 	cc.ConnTracker.Timeout = func(conntrack.Entry) time.Duration { return 0 }
