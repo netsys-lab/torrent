@@ -847,7 +847,7 @@ func (t *Torrent) worstBadConn() *connection {
 		// connection quota and is older than a minute.
 		if wcs.Len() >= (t.maxEstablishedConns+1)/2 {
 			// Give connections 1 minute to prove themselves.
-			if time.Since(c.completedHandshake) > time.Minute {
+			if time.Since(*c.completedHandshake) > time.Minute {
 				return c
 			}
 		}
@@ -1509,6 +1509,11 @@ func (t *Torrent) addConnection(c *connection) (err error) {
 	if len(t.conns) >= t.maxEstablishedConns {
 		panic(len(t.conns))
 	}
+
+	// if !t.cl.PathSelectionHandshakeTime(c) {
+	// 	return errors.New("HandshakeTime does not want this connection")
+	// }
+	t.cl.connections = append(t.cl.connections, c)
 	t.conns[c] = struct{}{}
 	return nil
 }

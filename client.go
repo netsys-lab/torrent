@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +58,7 @@ type Client struct {
 	config         *ClientConfig
 	logger         log.Logger
 	connections    []*connection
+	realCons       []*connection
 	peerID         PeerID
 	defaultStorage *storage.Client
 	onClose        []func()
@@ -73,8 +75,9 @@ type Client struct {
 	badPeerIPs        map[string]struct{}
 	torrents          map[InfoHash]*Torrent
 
-	acceptLimiter   map[ipStr]int
-	dialRateLimiter *rate.Limiter
+	acceptLimiter                  map[ipStr]int
+	dialRateLimiter                *rate.Limiter
+	pathSelectionHandshakeTimeDone bool
 }
 
 type ipStr string
@@ -191,11 +194,13 @@ func NewClient(cfg *ClientConfig) (cl *Client, err error) {
 		}
 	}()
 	cl = &Client{
-		config:            cfg,
-		dopplegangerAddrs: make(map[string]struct{}),
-		torrents:          make(map[metainfo.Hash]*Torrent),
-		dialRateLimiter:   rate.NewLimiter(10, 10),
-		connections:       make([]*connection, 20),
+		config:                         cfg,
+		dopplegangerAddrs:              make(map[string]struct{}),
+		torrents:                       make(map[metainfo.Hash]*Torrent),
+		dialRateLimiter:                rate.NewLimiter(10, 10),
+		connections:                    make([]*connection, 20),
+		realCons:                       make([]*connection, 0),
+		pathSelectionHandshakeTimeDone: false,
 	}
 	go cl.acceptLimitClearer()
 	cl.initLogger()
@@ -557,8 +562,8 @@ func (cl *Client) dialFirst(ctx context.Context, addr net.Addr) (res dialResult)
 		cl.eachListener(func(s socket) bool {
 			func() {
 				network := s.Addr().Network()
-				fmt.Println("GOT NETWORK STRING")
-				fmt.Println(parseNetworkString(network))
+				// fmt.Println("GOT NETWORK STRING")
+				// fmt.Println(parseNetworkString(network))
 				if !peerNetworkEnabled(parseNetworkString(network), cl.config) {
 					return
 				}
@@ -656,6 +661,7 @@ func (cl *Client) noLongerHalfOpen(t *Torrent, addr string) {
 // *connection if no connection for valid reasons.
 func (cl *Client) handshakesConnection(ctx context.Context, nc net.Conn, t *Torrent, encryptHeader bool, remoteAddr net.Addr) (c *connection, err error) {
 	c = cl.newConnection(nc, true, remoteAddr)
+	c.startHandshake = time.Now()
 	c.headerEncrypted = encryptHeader
 	ctx, cancel := context.WithTimeout(ctx, cl.config.HandshakesTimeout)
 	defer cancel()
@@ -726,7 +732,7 @@ func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource, s
 	cl.dialRateLimiter.Wait(context.Background())
 	c, err := cl.establishOutgoingConn(t, addr)
 
-	if scionPath != nil {
+	if scionPath != nil && c != nil {
 		fmt.Println("SET SCION PATH")
 		fmt.Println((*scionPath).Interfaces())
 		c.scionPath = scionPath
@@ -850,7 +856,10 @@ func (cl *Client) connBtHandshake(c *connection, ih *metainfo.Hash) (ret metainf
 	ret = res.Hash
 	c.PeerExtensionBytes = res.PeerExtensionBits
 	c.PeerID = res.PeerID
-	c.completedHandshake = time.Now()
+	t := time.Now()
+	c.completedHandshake = &t
+	cl.realCons = append(cl.realCons, c)
+	cl.PathSelectionHandshakeTime(false)
 	return
 }
 
@@ -918,11 +927,191 @@ func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 	defer t.dropConnection(c)
 	go c.writer(time.Minute)
 	cl.sendInitialMessages(c, t)
-	cl.connections = append(cl.connections, c)
+	/* if cl.PathSelectionHandshakeTime(c) {
+		c.SetInterested(false, func(msg pp.Message) bool {
+			c.Post(msg)
+			return true
+		})
+		c.Choke(func(msg pp.Message) bool {
+			c.Post(msg)
+			return true
+		});
+
+		fmt.Println("PATH SELECTION SUCCESSFULL")
+
+
+	} else {
+		fmt.Println("Client decided to drop connection due to handshakeTime func")
+		c.Close()
+	}*/
+
 	err := c.mainReadLoop()
 	if err != nil && cl.config.Debug {
 		cl.logger.Printf("error during connection main read loop: %s", err)
 	}
+
+}
+
+func calcDiffPercent(a, b, p int64) bool {
+	x := a - b
+	return (a / x) < p
+}
+
+func (cl *Client) PathSelectionDownloadTime(timeSlot int64) {
+	newConns := make([]*connection, len(cl.realCons))
+	copy(newConns, cl.realCons)
+	sort.Slice(newConns, func(i, j int) bool {
+		return newConns[i].BytesReadOverTime[timeSlot] < newConns[j].BytesReadOverTime[timeSlot]
+	})
+
+	if cl.config.PathSelectionFunc == 1 { // numCons
+		for i, con := range newConns {
+			if i >= (cl.config.NumMaxCons - 1) {
+				con.SetInterested(false, func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+				con.Choke(func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+			} else {
+				con.SetInterested(true, func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+				con.Unchoke(func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+			}
+		}
+	} else if cl.config.PathSelectionFunc == 2 { // nearest neighbour
+
+		for _, con := range newConns {
+			if calcDiffPercent(newConns[0].BytesReadOverTime[timeSlot], con.BytesReadOverTime[timeSlot], cl.config.NearestXPercent) {
+				con.SetInterested(false, func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+				con.Choke(func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+			} else {
+				con.SetInterested(true, func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+				con.Unchoke(func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+			}
+		}
+	}
+}
+
+func (cl *Client) PathSelectionHandshakeTimeOld(c *connection) bool {
+	// numCons
+	if cl.config.PathSelectionFunc == 1 {
+		fmt.Println(len(cl.realCons))
+		fmt.Println(cl.config.NumMaxCons)
+		if len(cl.realCons) >= cl.config.NumMaxCons {
+			return false
+		}
+		return true
+	} else if cl.config.PathSelectionFunc == 2 { // nearest neighbour
+		if len(cl.realCons) == 0 {
+			return true
+		}
+		newConns := make([]*connection, len(cl.realCons))
+		copy(newConns, cl.realCons)
+		sort.Slice(newConns, func(i, j int) bool {
+			return newConns[i].completedHandshake.Unix() < newConns[j].completedHandshake.Unix()
+		})
+
+		if calcDiffPercent(newConns[0].completedHandshake.Unix(), c.completedHandshake.Unix(), cl.config.NearestXPercent) {
+			return false
+		}
+
+		return true
+	}
+
+	return true
+}
+func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
+	if cl.pathSelectionHandshakeTimeDone {
+		fmt.Println("SKIP Handshake Time Path Selection")
+		return
+	}
+	if len(cl.realCons) < cl.config.MaxConnectionsPerPeer && !forceSelect {
+		fmt.Println("Move to later Handshake Time Path Selection")
+		return
+	}
+	fmt.Println("RUN Handshake Time Path Selection")
+	for _, con := range cl.realCons {
+		if con.completedHandshake == nil {
+			fmt.Println("FOUND NOT SET COMPLETED HANDSHAKE")
+			return
+		}
+	}
+
+	newConns := make([]*connection, len(cl.realCons))
+	copy(newConns, cl.realCons)
+	sort.Slice(newConns, func(i, j int) bool {
+		diffI := newConns[i].completedHandshake.UnixNano() - newConns[i].startHandshake.UnixNano()
+		diffJ := newConns[j].completedHandshake.UnixNano() - newConns[j].startHandshake.UnixNano()
+		return diffI < diffJ
+	})
+
+	for _, con := range newConns {
+		fmt.Println(con.completedHandshake.UnixNano())
+		fmt.Println(con.startHandshake.UnixNano())
+		fmt.Printf("%d\n", con.completedHandshake.UnixNano()-con.startHandshake.UnixNano())
+		fmt.Println("-------------------")
+	}
+
+	if cl.config.PathSelectionFunc == 1 { // numCons, works
+		for i, con := range newConns {
+			if i > (cl.config.NumMaxCons - 1) {
+				if con.scionPath != nil {
+					fmt.Println((*con.scionPath).Interfaces())
+				}
+
+				fmt.Println(fmt.Println(con))
+				fmt.Println("CLOSING CONN DUE TO NUMMAXCONS")
+				con.Close()
+			}
+		}
+	} else if cl.config.PathSelectionFunc == 2 { // nearest neighbour
+
+		for _, con := range newConns {
+			if calcDiffPercent(newConns[0].completedHandshake.Unix(), con.completedHandshake.Unix(), cl.config.NearestXPercent) {
+				/*con.SetInterested(false, func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+				con.Choke(func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})*/
+				con.Close()
+			} else {
+				/*con.SetInterested(true, func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+				con.Unchoke(func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})*/
+
+			}
+		}
+	}
+	fmt.Println("FINISH SELECTION")
+	cl.pathSelectionHandshakeTimeDone = true
 }
 
 // See the order given in Transmission's tr_peerMsgsNew.
@@ -1253,12 +1442,38 @@ func (cl *Client) allTorrentsCompleted() bool {
 func (cl *Client) WaitAll() bool {
 	cl.lock()
 	defer cl.unlock()
+
+	ticker := time.NewTicker(time.Duration(cl.config.TimeSlotInterval) * time.Millisecond)
+	done := make(chan bool)
+	var interval int64
+	interval = 0
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				// Update connection stats
+				interval += cl.config.TimeSlotInterval
+				for _, con := range cl.connections {
+					con.TimerTick(interval)
+				}
+				cl.PathSelectionHandshakeTime(true)
+				// cl.PathSelectionDownloadTime(interval)
+			}
+		}
+	}()
+
 	for !cl.allTorrentsCompleted() {
 		if cl.closed.IsSet() {
+			ticker.Stop()
+			done <- true
 			return false
 		}
 		cl.event.Wait()
 	}
+	ticker.Stop()
+	done <- true
 	return true
 }
 
@@ -1357,16 +1572,16 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remote net.Addr) (c 
 	c = &connection{
 		conn:                 nc,
 		outgoing:             outgoing,
-		Choked:               true,
-		PeerChoked:           true,
+		Choked:               false, //TMPCHANGE
+		PeerChoked:           false, //TMPCHANGE
 		PeerMaxRequests:      cl.config.MaxRequestsPerPeer,
 		writeBuffer:          new(bytes.Buffer),
 		remoteAddr:           remoteAddr,
 		network:              remote.Network(),
 		scionAddr:            snetAddr,
 		TimeInterval:         1000,
-		BytesReadOverTime:    make(map[int64]int64),
-		BytesWrittenOverTime: make(map[int64]int64),
+		BytesReadOverTime:    make(map[int64]int64, 1000),
+		BytesWrittenOverTime: make(map[int64]int64, 1000),
 	}
 	c.logger = cl.logger.WithValues(c,
 		log.Debug, // I want messages to default to debug, and can set it here as it's only used by new code

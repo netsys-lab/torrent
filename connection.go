@@ -67,7 +67,8 @@ type connection struct {
 	reconciledHandshakeStats bool
 
 	lastMessageReceived     time.Time
-	completedHandshake      time.Time
+	completedHandshake      *time.Time
+	startHandshake          time.Time
 	lastUsefulChunkReceived time.Time
 	lastChunkSent           time.Time
 
@@ -122,7 +123,9 @@ type connection struct {
 	uploadTimer *time.Timer
 	writerCond  sync.Cond
 
-	logger log.Logger
+	logger           log.Logger
+	lastReadBytes    int64
+	lastWrittenBytes int64
 }
 
 func (cn *connection) updateExpectingChunks() {
@@ -289,7 +292,7 @@ func (cn *connection) WriteStatus(w io.Writer, t *Torrent) {
 	fmt.Fprintf(w, "%+-55q %s %s-%s\n", cn.PeerID, cn.PeerExtensionBytes, cn.localAddr(), cn.remoteAddr)
 	fmt.Fprintf(w, "    last msg: %s, connected: %s, last helpful: %s, itime: %s, etime: %s\n",
 		eventAgeString(cn.lastMessageReceived),
-		eventAgeString(cn.completedHandshake),
+		eventAgeString(*cn.completedHandshake),
 		eventAgeString(cn.lastHelpful()),
 		cn.cumInterest(),
 		cn.totalExpectingTime(),
@@ -1107,6 +1110,15 @@ func (c *connection) onReadRequest(r request) error {
 	return nil
 }
 
+func (c *connection) TimerTick(interval int64) {
+	if c != nil {
+		c.BytesReadOverTime[interval] = c.stats.BytesRead.n - c.lastReadBytes
+		c.BytesWrittenOverTime[interval] = c.stats.BytesWritten.n - c.lastWrittenBytes
+		c.lastReadBytes = c.stats.BytesRead.n
+		c.lastWrittenBytes = c.stats.BytesWritten.n
+	}
+}
+
 // Processes incoming BitTorrent wire-protocol messages. The client lock is held upon entry and
 // exit. Returning will end the connection.
 func (c *connection) mainReadLoop() (err error) {
@@ -1119,31 +1131,11 @@ func (c *connection) mainReadLoop() (err error) {
 	}()
 	t := c.t
 	cl := t.cl
-	var interval int64
-	interval = 0
-	c.BytesReadOverTime[interval] = 0
-	c.BytesWrittenOverTime[interval] = 0
-	var lastReadBytes int64
-	lastReadBytes = 0
-	var lastWrittenBytes int64
-	lastWrittenBytes = 0
-	c.Ticker = time.NewTicker(time.Duration(c.TimeInterval) * time.Millisecond)
-	done := make(chan bool)
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			case <-c.Ticker.C:
-				interval += c.TimeInterval
-				// log.Printf("Set brot with bytesread %d - %d \n", c.stats.BytesRead.n, lastReadBytes)
-				c.BytesReadOverTime[interval] = c.stats.BytesRead.n - lastReadBytes
-				c.BytesWrittenOverTime[interval] = c.stats.BytesWritten.n - lastWrittenBytes
-				lastReadBytes = c.stats.BytesRead.n
-				lastWrittenBytes = c.stats.BytesWritten.n
-			}
-		}
-	}()
+
+	c.BytesReadOverTime[0] = 0
+	c.BytesWrittenOverTime[0] = 0
+	c.lastReadBytes = 0
+	c.lastWrittenBytes = 0
 
 	decoder := pp.Decoder{
 		R:         bufio.NewReaderSize(c.r, 1<<17), //TMPCHANGE 17
@@ -1158,13 +1150,10 @@ func (c *connection) mainReadLoop() (err error) {
 			err = decoder.Decode(&msg)
 		}()
 		if t.closed.IsSet() || c.closed.IsSet() || err == io.EOF {
-			c.Ticker.Stop()
-			done <- true
+
 			return nil
 		}
 		if err != nil {
-			c.Ticker.Stop()
-			done <- true
 			return err
 		}
 		c.readMsg(&msg)
@@ -1247,8 +1236,6 @@ func (c *connection) mainReadLoop() (err error) {
 			err = fmt.Errorf("received unknown message type: %#v", msg.Type)
 		}
 		if err != nil {
-			c.Ticker.Stop()
-			done <- true
 			return err
 		}
 	}
@@ -1295,9 +1282,12 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 		}
 		fmt.Println("HANDSHOOK CONN")
 		fmt.Println(c.remoteAddr)
-		path, _ := c.scionAddr.GetPath()
-		fmt.Printf("%s\n", c.scionAddr.String())
-		fmt.Printf("%s\n", path.Fingerprint())
+		if c.scionAddr != nil {
+			path, _ := c.scionAddr.GetPath()
+			fmt.Printf("%s\n", c.scionAddr.String())
+			fmt.Printf("%s\n", path.Fingerprint())
+		}
+
 		c.requestPendingMetadata()
 		return nil
 	case metadataExtendedId:
@@ -1600,7 +1590,7 @@ func (c *connection) sendChunk(r request, msg func(pp.Message) bool) (more bool,
 	// Count the chunk being sent, even if it isn't.
 	b := make([]byte, r.Length)
 	p := c.t.info.Piece(int(r.Index))
-	fmt.Println("SEND CHUNK")
+	// fmt.Println("SEND CHUNK")
 	n, err := c.t.readAt(b, p.Offset()+int64(r.Begin))
 	if n != len(b) {
 		if err == nil {

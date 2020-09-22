@@ -198,6 +198,12 @@ var flags = struct {
 	ReuseFirstPath        bool
 	TcpPort               int
 	AllowDuplicatePaths   bool
+	NumMaxCons            int
+	NearestXPercent       int64
+	TimeSlotInterval      int64
+	PathSelectionType     int64
+	PathSelectionFunc     int64
+	StorageDir            string
 	tagflag.StartPos
 	Torrent []string `arity:"+" help:"torrent file path or magnet uri"`
 }{
@@ -250,6 +256,16 @@ func mainErr() error {
 	clientConfig.Seed = flags.Seed
 	clientConfig.PublicIp4 = flags.PublicIP
 	clientConfig.PublicIp6 = flags.PublicIP
+
+	clientConfig.NumMaxCons = flags.NumMaxCons
+	clientConfig.NearestXPercent = flags.NearestXPercent
+	if flags.TimeSlotInterval > 0 {
+		clientConfig.TimeSlotInterval = flags.TimeSlotInterval
+	}
+
+	clientConfig.PathSelectionType = flags.PathSelectionType
+	clientConfig.PathSelectionFunc = flags.PathSelectionFunc
+
 	if flags.PackedBlocklist != "" {
 		blocklist, err := iplist.MMapPackedFile(flags.PackedBlocklist)
 		if err != nil {
@@ -260,8 +276,10 @@ func mainErr() error {
 	}
 	if flags.Mmap {
 		// clientConfig.DefaultStorage = storage.NewBoltDB("tmp")
-		clientConfig.DefaultStorage = storage.NewMMap("tmp")
+		clientConfig.DefaultStorage = storage.NewMMap(flags.StorageDir)
 		// clientConfig.DefaultStorage = storage.NewFileByInfoHash("tmp")
+	} else {
+		// clientConfig.DefaultStorage = storage.NewBoltDB(flags.StorageDir)
 	}
 	if flags.Addr != nil {
 		clientConfig.SetListenAddr(flags.Addr.String())

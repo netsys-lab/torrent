@@ -108,16 +108,16 @@ func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error)
 	if err := scion_torrent.InitSQUICCerts(); err != nil {
 		return nil, err
 	}
-	fmt.Println("ADDRESS:")
-	fmt.Println(addr.String())
+	// fmt.Println("ADDRESS:")
+	// fmt.Println(addr.String())
 	snetAddr, ok := addr.(*snet.UDPAddr)
 
 	if !ok {
 		return nil, fmt.Errorf("sdial: invalid addr type: %s", addr.String())
 	}
 
-	fmt.Println("SNET ADDRESS:")
-	fmt.Println(snetAddr.String())
+	// fmt.Println("SNET ADDRESS:")
+	// fmt.Println(snetAddr.String())
 	// Copy the snet addr -> To ensure we won't manipulate the old addr by attaching hops/path
 	//snetAddr := targetAddr.Copy()
 	// str := s.local.String()
@@ -153,7 +153,7 @@ func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error)
 		snetAddr.NextHop, _ = argMinPath.HostInfo.Overlay()
 		// get a connection object using that path:
 	}*/
-	fmt.Println("DIAL ADDR")
+	// fmt.Println("DIAL ADDR")
 	sess, err := appquic.DialAddr(snetAddr, "127.0.0.1:42425", scion_torrent.TLSCfg, &quic.Config{
 		KeepAlive: true,
 	})
