@@ -953,96 +953,67 @@ func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 }
 
 func calcDiffPercent(a, b, p int64) bool {
-	x := a - b
-	return (a / x) < p
+	if a == b {
+		return false
+	}
+	x := ((b * 100) / (a))
+
+	if x < p {
+		fmt.Printf("(%d < %d) for a=%d,b=%d\n", x, p, a, b)
+	}
+
+	return (x < p)
 }
 
 func (cl *Client) PathSelectionDownloadTime(timeSlot int64) {
+
+	// fmt.Printf("DOWNLOAD TIME at slot %d\n", timeSlot)
+
+	if cl.config.PathSelectionFunc < 1 {
+		return
+	}
+
 	newConns := make([]*connection, len(cl.realCons))
 	copy(newConns, cl.realCons)
 	sort.Slice(newConns, func(i, j int) bool {
-		return newConns[i].BytesReadOverTime[timeSlot] < newConns[j].BytesReadOverTime[timeSlot]
+		return newConns[i].BytesReadOverTime[timeSlot] > newConns[j].BytesReadOverTime[timeSlot]
 	})
+
+	// fmt.Println("SORTED CONNS")
+	// for i, con := range newConns {
+	//		fmt.Printf("con %d has BytesReadOverTime %d", i, con.BytesReadOverTime[timeSlot])
+	//	}
 
 	if cl.config.PathSelectionFunc == 1 { // numCons
 		for i, con := range newConns {
 			if i >= (cl.config.NumMaxCons - 1) {
-				con.SetInterested(false, func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
-				con.Choke(func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
+				con.Close()
 			} else {
-				con.SetInterested(true, func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
-				con.Unchoke(func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
+				// con.Close()
 			}
 		}
 	} else if cl.config.PathSelectionFunc == 2 { // nearest neighbour
 
 		for _, con := range newConns {
-			if calcDiffPercent(newConns[0].BytesReadOverTime[timeSlot], con.BytesReadOverTime[timeSlot], cl.config.NearestXPercent) {
-				con.SetInterested(false, func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
-				con.Choke(func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
+			if !con.WasClosed && calcDiffPercent(newConns[0].BytesReadOverTime[timeSlot], con.BytesReadOverTime[timeSlot], cl.config.NearestXPercent) {
+				con.Close()
+				con.WasClosed = true
+				fmt.Printf("CLOSING CONN DUE TO NearestXPercent in timeslot %d", timeSlot)
 			} else {
-				con.SetInterested(true, func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
-				con.Unchoke(func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
+				// con.Close()
 			}
 		}
 	}
 }
 
-func (cl *Client) PathSelectionHandshakeTimeOld(c *connection) bool {
-	// numCons
-	if cl.config.PathSelectionFunc == 1 {
-		fmt.Println(len(cl.realCons))
-		fmt.Println(cl.config.NumMaxCons)
-		if len(cl.realCons) >= cl.config.NumMaxCons {
-			return false
-		}
-		return true
-	} else if cl.config.PathSelectionFunc == 2 { // nearest neighbour
-		if len(cl.realCons) == 0 {
-			return true
-		}
-		newConns := make([]*connection, len(cl.realCons))
-		copy(newConns, cl.realCons)
-		sort.Slice(newConns, func(i, j int) bool {
-			return newConns[i].completedHandshake.Unix() < newConns[j].completedHandshake.Unix()
-		})
+func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 
-		if calcDiffPercent(newConns[0].completedHandshake.Unix(), c.completedHandshake.Unix(), cl.config.NearestXPercent) {
-			return false
-		}
-
-		return true
+	if cl.config.PathSelectionFunc < 1 {
+		return
 	}
 
-	return true
-}
-func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 	if cl.pathSelectionHandshakeTimeDone {
-		fmt.Println("SKIP Handshake Time Path Selection")
+		// fmt.Println("SKIP Handshake Time Path Selection")
 		return
 	}
 	if len(cl.realCons) < cl.config.MaxConnectionsPerPeer && !forceSelect {
@@ -1080,7 +1051,7 @@ func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 				}
 
 				fmt.Println(fmt.Println(con))
-				fmt.Println("CLOSING CONN DUE TO NUMMAXCONS")
+				fmt.Println("CLOSING CONN DUE TO NUMMAXCONS in pathselect")
 				con.Close()
 			}
 		}
@@ -1096,6 +1067,7 @@ func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 					con.Post(msg)
 					return true
 				})*/
+				fmt.Println("CLOSING CONN DUE TO NearestXPercent")
 				con.Close()
 			} else {
 				/*con.SetInterested(true, func(msg pp.Message) bool {
@@ -1402,10 +1374,10 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
 		t.addPeers(pp)
 	}
 
-	fmt.Println("PEERS")
+	/*fmt.Println("PEERS")
 	t.peers.Each(func(peer Peer) {
 		fmt.Println(peer.addr())
-	})
+	})*/
 
 	t.maybeNewConns()
 	return t, new, nil
@@ -1458,8 +1430,12 @@ func (cl *Client) WaitAll() bool {
 				for _, con := range cl.connections {
 					con.TimerTick(interval)
 				}
-				cl.PathSelectionHandshakeTime(true)
-				// cl.PathSelectionDownloadTime(interval)
+				// if interval == cl.config.TimeSlotInterval {
+				cl.PathSelectionHandshakeTime(false)
+				// } else {
+				cl.PathSelectionDownloadTime(interval)
+				// }
+
 			}
 		}
 	}()

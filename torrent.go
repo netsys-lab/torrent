@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"net"
 	"net/url"
-	"os"
 	"sort"
 	"sync"
 	"text/tabwriter"
@@ -748,27 +747,29 @@ func (t *Torrent) pieceLength(piece pieceIndex) pp.Integer {
 }
 
 func (t *Torrent) hashPiece(piece pieceIndex) (ret metainfo.Hash) {
-	hash := pieceHash.New()
-	p := t.piece(piece)
-	p.waitNoPendingWrites()
-	ip := t.info.Piece(int(piece))
-	pl := ip.Length()
+	// TMPCHANGE, removed piece hashing
+	/*
+		hash := pieceHash.New()
+		p := t.piece(piece)
+		p.waitNoPendingWrites()
+		ip := t.info.Piece(int(piece))
+		pl := ip.Length()
 
-	// TMPCHANGE
-	// n := pl
-	// err := nil
-	// _, err := hash.Write(p.hash.Bytes())
-	// n := pl
-	// n, err := io.Copy(hash, *p.hash, 0, pl)
-	n, err := io.Copy(hash, io.NewSectionReader(t.pieces[piece].Storage(), 0, pl))
-	if int64(n) == pl {
-		// fmt.Println("COPY EXACT...")
-		missinggo.CopyExact(&ret, p.hash) //hash.Sum(nil))
-		return
-	}
-	if err != io.ErrUnexpectedEOF && !os.IsNotExist(err) {
-		t.logger.Printf("unexpected error hashing piece %d through %T: %s", piece, t.storage.TorrentImpl, err)
-	}
+		// TMPCHANGE, removed piece hashing
+		// n := pl
+		// err := nil
+		// _, err := hash.Write(p.hash.Bytes())
+		// n := pl
+		// n, err := io.Copy(hash, *p.hash, 0, pl)
+		// n, err := io.Copy(hash, io.NewSectionReader(t.pieces[piece].Storage(), 0, pl))
+		/*if int64(n) == pl {
+			// fmt.Println("COPY EXACT...")
+			missinggo.CopyExact(&ret, p.hash) //hash.Sum(nil))
+			return
+		}
+		if err != io.ErrUnexpectedEOF && !os.IsNotExist(err) {
+			t.logger.Printf("unexpected error hashing piece %d through %T: %s", piece, t.storage.TorrentImpl, err)
+		}*/
 	return
 }
 
@@ -1715,13 +1716,17 @@ func (t *Torrent) getPieceToHash() (ret pieceIndex, ok bool) {
 
 func (t *Torrent) pieceHasher(index pieceIndex) {
 	p := t.piece(index)
-	sum := t.hashPiece(index)
+	// TMPCHANGE, remove piece hashing
+	// sum := t.hashPiece(index)
+	t.hashPiece(index)
 	t.storageLock.RUnlock()
 	t.cl.lock()
 	defer t.cl.unlock()
 	p.hashing = false
 	t.updatePiecePriority(index)
-	t.pieceHashed(index, sum == *p.hash)
+	// TMPCHANGE, remove piece hashing
+	t.pieceHashed(index, true)
+	// t.pieceHashed(index, sum == *p.hash)
 	t.publishPieceChange(index)
 	t.activePieceHashes--
 	t.tryCreateMorePieceHashers()

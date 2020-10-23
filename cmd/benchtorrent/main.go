@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -31,6 +32,14 @@ import (
 	// "github.com/netsec-ethz/scion-apps/pkg/appnet"
 	"golang.org/x/time/rate"
 )
+
+func Map(vs []string, f func(string) string) []string {
+	vsm := make([]string, len(vs))
+	for i, v := range vs {
+		vsm[i] = f(v)
+	}
+	return vsm
+}
 
 // mangleSCIONAddr mangles a SCION address string (if it is one) so it can be
 // safely used in the host part of a URL.
@@ -215,6 +224,8 @@ var flags = struct {
 	AllowDuplicatePaths:   false,
 	ReuseFirstPath:        false,
 	MaxRequestsPerPeer:    250,
+	PathSelectionFunc:     -1,
+	PathSelectionType:     -1,
 }
 
 func stdoutAndStderrAreSameFile() bool {
@@ -356,21 +367,29 @@ func mainErr() error {
 				numPaths = clientConfig.MaxConnectionsPerPeer
 			}
 
+			// Use the same path X times
+			if clientConfig.ReuseFirstPath && clientConfig.AllowDuplicatePaths {
+				numPaths = clientConfig.MaxConnectionsPerPeer
+			}
+
 			fmt.Printf("Using %d paths to scion peer %s due to MaxConnectionsPerPeer\n", numPaths, remote)
 
 			for i := 0; i < numPaths; i++ {
-				pathAddr := torrent.ChoosePath(peerAddr, paths[i])
+				var pathAddr *snet.UDPAddr
 
 				if flags.ReuseFirstPath {
 					pathAddr = torrent.ChoosePath(peerAddr, paths[0])
 					fmt.Printf("Reusing first path %s to scion peer %s\n", paths[0], remote)
+					sPaths = append(sPaths, &paths[0])
 				} else {
+					pathAddr = torrent.ChoosePath(peerAddr, paths[i])
 					fmt.Printf("Using path %s to scion peer %s\n", paths[i], remote)
 					fmt.Printf("Fingerprint %s", paths[i].Fingerprint())
+					sPaths = append(sPaths, &paths[i])
 				}
 
 				peers = append(peers, pathAddr)
-				sPaths = append(sPaths, &paths[i])
+
 			}
 		}
 		if len(peers) == 0 {
@@ -452,6 +471,38 @@ func mainErr() error {
 	}
 	addTorrents(client)
 	start := time.Now()
+	pid := os.Getpid()
+	s := []string{}
+
+	pidsStr, ok := os.LookupEnv("PERF_PIDS")
+	if ok {
+		s = strings.Split(pidsStr, ",")
+	}
+
+	s1 := strconv.FormatInt(int64(pid), 10)
+	s = append(s, s1)
+
+	s = Map(s, func(s string) string { return fmt.Sprintf("p-%s", s) })
+	fmt.Printf("Calling perf.sh with args %s", s)
+	fmt.Println(s)
+	s = append([]string{"./perf.sh"}, s...)
+
+	cmd := exec.Command("bash", s...)
+	defer cmd.Process.Kill()
+	outfile, err := os.Create(fmt.Sprintf("./perf-%s.txt", s1))
+	if err != nil {
+		panic(err)
+	}
+	defer outfile.Close()
+	cmd.Stdout = outfile
+	cmd.Stderr = outfile
+	err = cmd.Start()
+	fmt.Println(err)
+	go func() {
+		err2 := cmd.Wait()
+		fmt.Println(err2)
+	}()
+
 	if client.WaitAll() {
 		elapsed := time.Since(start)
 		log.Printf("Binomial took %s", elapsed)

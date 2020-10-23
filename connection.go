@@ -126,6 +126,7 @@ type connection struct {
 	logger           log.Logger
 	lastReadBytes    int64
 	lastWrittenBytes int64
+	WasClosed        bool
 }
 
 func (cn *connection) updateExpectingChunks() {
