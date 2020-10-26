@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/anacrolix/tagflag"
@@ -14,11 +15,14 @@ import (
 )
 
 var flags = struct {
-	IsServer bool
-
+	IsServer  bool
+	NumCons   int
+	StartPort int
 	tagflag.StartPos
 }{
-	IsServer: true,
+	IsServer:  true,
+	NumCons:   1,
+	StartPort: 42522,
 }
 
 const (
@@ -46,14 +50,27 @@ func main() {
 
 func mainErr() error {
 	tagflag.Parse(&flags)
-	if flags.IsServer {
-		runServer(42422)
-	} else {
-		addrStr := "19-ffaa:1:c3f,[127.0.0.1]:42422"
-		serverAddr, err := appnet.ResolveUDPAddr(addrStr)
-		Check(err)
-		runClient(serverAddr)
+
+	startPort := uint16(flags.StartPort)
+	var i uint16
+	i = 0
+	var wg sync.WaitGroup
+	for i < uint16(flags.NumCons) {
+		go func(wg *sync.WaitGroup, startPort uint16, i uint16) {
+			defer wg.Done()
+			if flags.IsServer {
+				runServer(startPort + i)
+			} else {
+				addrStr := fmt.Sprintf("19-ffaa:1:c3f,[127.0.0.1]:%d", startPort+i)
+				serverAddr, err := appnet.ResolveUDPAddr(addrStr)
+				Check(err)
+				runClient(serverAddr)
+			}
+		}(&wg, startPort, i)
+		i++
 	}
+	wg.Wait()
+	time.Sleep(time.Minute * 5)
 
 	return nil
 }

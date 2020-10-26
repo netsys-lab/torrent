@@ -38,17 +38,17 @@ func (me *rateLimitedReader) Read(b []byte) (n int, err error) {
 	} else {
 		// Limit the read to within the burst.
 		// TMPCHANGE ENABLE RATE LIMITING
-		/* if me.l.Limit() != rate.Inf && len(b) > me.l.Burst() {
+		if me.l.Limit() != rate.Inf && len(b) > me.l.Burst() {
 			b = b[:me.l.Burst()]
-		}*/
+		}
 		n, err = me.r.Read(b)
-		/*now := time.Now()
+		now := time.Now()
 		r := me.l.ReserveN(now, n)
 		if !r.OK() {
 			panic(n)
 		}
 		me.lastRead = now
-		time.Sleep(r.Delay())*/
+		time.Sleep(r.Delay())
 	}
 	return
 }

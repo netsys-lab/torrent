@@ -212,6 +212,11 @@ var flags = struct {
 	TimeSlotInterval      int64
 	PathSelectionType     int64
 	PathSelectionFunc     int64
+	RunIperfAfterSeconds  int64
+	IperfBandwidth        int64
+	IperfDuration         int64
+	IperfServer           string
+	IperfServer2          string
 	StorageDir            string
 	tagflag.StartPos
 	Torrent []string `arity:"+" help:"torrent file path or magnet uri"`
@@ -226,6 +231,11 @@ var flags = struct {
 	MaxRequestsPerPeer:    250,
 	PathSelectionFunc:     -1,
 	PathSelectionType:     -1,
+	RunIperfAfterSeconds:  -1,
+	IperfBandwidth:        0,
+	IperfServer:           "",
+	IperfServer2:          "",
+	IperfDuration:         10,
 }
 
 func stdoutAndStderrAreSameFile() bool {
@@ -257,6 +267,39 @@ func main() {
 		log.Printf("error in main: %v", err)
 		os.Exit(1)
 	}
+}
+
+func runIperf(runIperfAfterSeconds int64, iperfBandwidth int64, iperfDuration int64, iperfServer string, num int) {
+
+	time.Sleep(time.Duration(runIperfAfterSeconds) * time.Second)
+
+	var cmd *exec.Cmd
+	startPort := 5401
+	// Server
+	if iperfServer == "" {
+		// cmd = exec.Command("/usr/bin/iperf", "-u", "-s", "-p", fmt.Sprintf("%d", startPort+num))
+		cmd = exec.Command("./goben", "-udp", "-readSize=9000", "-connections=6", fmt.Sprintf("-defaultPort=:%d", startPort+num))
+	} else { // Client {
+		if runIperfAfterSeconds == -1 {
+			return
+		} // ,
+		cmd = exec.Command("./goben", "-udp", "-connections=6", "-passiveServer=true", "-writeSize=9000", fmt.Sprintf("-defaultPort=:%d", startPort+num), "-hosts", iperfServer, fmt.Sprintf("-totalDuration=%ds", iperfDuration))
+		// cmd = exec.Command("/usr/bin/iperf", "-u", "-p", fmt.Sprintf("%d", startPort+num), "4", "-c", iperfServer, "-b", fmt.Sprintf("%dm", iperfBandwidth), "-t", strconv.FormatInt(iperfDuration, 10))
+	}
+
+	fmt.Println(cmd.Args)
+
+	outfile, err := os.Create(fmt.Sprintf("./iperf-%d.txt", num))
+	if err != nil {
+		panic(err)
+	}
+	defer outfile.Close()
+	cmd.Stdout = outfile
+	cmd.Stderr = outfile
+	err = cmd.Start()
+	fmt.Println(err)
+	err2 := cmd.Wait()
+	fmt.Println(err2)
 }
 
 func mainErr() error {
@@ -503,6 +546,9 @@ func mainErr() error {
 		fmt.Println(err2)
 	}()
 
+	go runIperf(flags.RunIperfAfterSeconds, flags.IperfBandwidth, flags.IperfDuration, flags.IperfServer, 1)
+	go runIperf(flags.RunIperfAfterSeconds, flags.IperfBandwidth, flags.IperfDuration, flags.IperfServer2, 2)
+	// go runIperf(flags.RunIperfAfterSeconds, flags.IperfBandwidth, flags.IperfDuration, flags.IperfServer, 2)
 	if client.WaitAll() {
 		elapsed := time.Since(start)
 		log.Printf("Binomial took %s", elapsed)
