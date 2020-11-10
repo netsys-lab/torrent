@@ -13,8 +13,8 @@ func worseConn(l, r *connection) bool {
 		l.lastHelpful().Equal(r.lastHelpful()),
 		l.lastHelpful().Before(r.lastHelpful()))
 	ml.StrictNext(
-		l.completedHandshake.Equal(r.completedHandshake),
-		l.completedHandshake.Before(r.completedHandshake))
+		l.completedHandshake.Equal(*r.completedHandshake),
+		l.completedHandshake.Before(*r.completedHandshake))
 	ml.Next(func() (bool, bool) {
 		return l.peerPriority() == r.peerPriority(), l.peerPriority() < r.peerPriority()
 	})

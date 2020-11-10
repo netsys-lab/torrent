@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"log"
-
 	"github.com/anacrolix/torrent/metainfo"
 )
 
@@ -18,10 +16,12 @@ type PieceCompletion interface {
 }
 
 func pieceCompletionForDir(dir string) (ret PieceCompletion) {
-	ret, err := NewBoltPieceCompletion(dir)
-	if err != nil {
-		log.Printf("couldn't open piece completion db in %q: %s", dir, err)
-		ret = NewMapPieceCompletion()
-	}
+	// ret, err := NewBoltPieceCompletion(dir)
+	// log.Printf("Bolt piece complettion BOLT BOLT BVOLT\n")
+	// if err != nil {
+	// TMPCHANGE
+	// 	log.Printf("couldn't open piece completion db in %q: %s", dir, err)
+	ret = NewMapPieceCompletion()
+	// }
 	return
 }

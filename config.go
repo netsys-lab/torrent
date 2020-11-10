@@ -134,6 +134,7 @@ type ClientConfig struct {
 	PublicScionAddr  *snet.UDPAddr
 	DisableScion     bool
 	RemoteScionAddrs []*snet.UDPAddr
+	RemoteScionPaths []*snet.Path
 
 	DisableAcceptRateLimiting bool
 	// Don't add connections that have the same peer ID as an existing
@@ -154,6 +155,13 @@ type ClientConfig struct {
 	TCPOnly                    bool
 	UDPOnly                    bool
 	ReuseFirstPath             bool
+	MaxRequestsPerPeer         int
+	NumMaxCons                 int
+	NearestXPercent            int64
+	TimeSlotInterval           int64
+	PathSelectionType          int64
+	PathSelectionFunc          int64
+	LAddr                      string
 }
 
 func (cfg *ClientConfig) SetListenAddr(addr string) *ClientConfig {
@@ -202,6 +210,8 @@ func NewDefaultClientConfig() *ClientConfig {
 		DisableScion:          true,
 		MaxConnectionsPerPeer: 1,
 		AllowDuplicatePaths:   false,
+		MaxRequestsPerPeer:    250,
+		TimeSlotInterval:      1000,
 	}
 	cc.ConnTracker.SetNoMaxEntries()
 	cc.ConnTracker.Timeout = func(conntrack.Entry) time.Duration { return 0 }

@@ -16,6 +16,7 @@ type Peer struct {
 	Source    peerSource
 	IsScion   bool
 	ScionAddr *snet.UDPAddr
+	ScionPath *snet.Path
 	// Peer is known to support encryption.
 	SupportsEncryption bool
 	peer_protocol.PexPeerFlags

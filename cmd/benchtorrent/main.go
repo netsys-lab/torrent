@@ -2,17 +2,20 @@
 package main
 
 import (
+	"context"
 	"expvar"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/lucas-clemente/quic-go"
 	"github.com/scionproto/scion/go/lib/snet"
 
 	"golang.org/x/xerrors"
@@ -24,6 +27,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/iplist"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/scion_torrent"
 	"github.com/anacrolix/torrent/storage"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/gosuri/uiprogress"
@@ -31,6 +35,14 @@ import (
 	// "github.com/netsec-ethz/scion-apps/pkg/appnet"
 	"golang.org/x/time/rate"
 )
+
+func Map(vs []string, f func(string) string) []string {
+	vsm := make([]string, len(vs))
+	for i, v := range vs {
+		vsm[i] = f(v)
+	}
+	return vsm
+}
 
 // mangleSCIONAddr mangles a SCION address string (if it is one) so it can be
 // safely used in the host part of a URL.
@@ -144,14 +156,15 @@ func addTorrents(client *torrent.Client) error {
 					return nil, xerrors.Errorf("error loading torrent file %q: %s\n", arg, err)
 				}
 				t, err := client.AddTorrent(metaInfo)
-				return nil, xerrors.Errorf("adding torrent: %w", err)
+				// return nil, xerrors.Errorf("adding torrent: %w", err)
 				return t, nil
 			}
 		}()
 		if err != nil {
+			log.Printf("RECEIVED TORRERR %s\n", err)
 			return xerrors.Errorf("adding torrent for %q: %w", arg, err)
 		}
-		torrentBar(t)
+		// torrentBar(t)
 
 		t.AddPeers(func() (ret []torrent.Peer) {
 			for _, ta := range flags.TestPeer {
@@ -192,10 +205,23 @@ var flags = struct {
 	TCPAddrList           []string `help:"List of remote TCP/UDP peers to use"`
 	UDPAddrList           []string `help:"List of remote TCP/UDP peers to use"`
 	MaxConnectionsPerPeer int
+	MaxRequestsPerPeer    int
 	PClient               bool
 	ReuseFirstPath        bool
 	TcpPort               int
 	AllowDuplicatePaths   bool
+	NumMaxCons            int
+	NearestXPercent       int64
+	TimeSlotInterval      int64
+	PathSelectionType     int64
+	PathSelectionFunc     int64
+	RunIperfAfterSeconds  int64
+	IperfBandwidth        int64
+	IperfDuration         int64
+	IperfServer           string
+	IperfServer2          string
+	StorageDir            string
+	LAddr                 string
 	tagflag.StartPos
 	Torrent []string `arity:"+" help:"torrent file path or magnet uri"`
 }{
@@ -206,6 +232,14 @@ var flags = struct {
 	MaxConnectionsPerPeer: 1,
 	AllowDuplicatePaths:   false,
 	ReuseFirstPath:        false,
+	MaxRequestsPerPeer:    250,
+	PathSelectionFunc:     -1,
+	PathSelectionType:     -1,
+	RunIperfAfterSeconds:  -1,
+	IperfBandwidth:        0,
+	IperfServer:           "",
+	IperfServer2:          "",
+	IperfDuration:         10,
 }
 
 func stdoutAndStderrAreSameFile() bool {
@@ -239,6 +273,101 @@ func main() {
 	}
 }
 
+func ListenQuicTest() error {
+	fmt.Println("LISTEN QUIC")
+	// serverAddr, err := net.ResolveUDPAddr("udp", "10.0.0.2")
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return err
+	}
+	/*laddr, err := net.ResolveUDPAddr("udp", address.String())
+	if err != nil {
+		return nil, err
+	}*/
+
+	conn, err := net.ListenPacket("udp", "10.0.0.2:42428")
+	fmt.Printf("LISTEN ON %s\n", "10.0.0.2:42428")
+	// conn, err := appnet.ListenPort(uint16(address.Host.Port)) //squic.ListenSCION(nil, address, &quic.Config{KeepAlive: true})
+	if err != nil {
+		return err
+	}
+
+	_, err2 := quic.Listen(conn, scion_torrent.TLSCfg, &quic.Config{KeepAlive: true})
+	if err2 != nil {
+		return err2
+	}
+
+	return nil
+}
+
+func DialQuicTest() error {
+
+	fmt.Println("------------------------------")
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return err
+	}
+	laddr, err := net.ResolveUDPAddr("udp", "10.0.0.2:42428")
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("LISTEN PACKET")
+	conn, err := net.ListenPacket("udp", "10.0.0.1:42428")
+
+	fmt.Println("Dial QUIC")
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return err
+	}
+
+	sess, err := quic.Dial(conn, laddr, "127.0.0.1:42425", scion_torrent.TLSCfg, &quic.Config{
+		KeepAlive: true,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("QUIC SESSION")
+	_, err2 := sess.OpenStreamSync(context.Background())
+	if err2 != nil {
+		return err2
+	}
+	fmt.Println("------------------------------")
+	return nil
+}
+
+func runIperf(runIperfAfterSeconds int64, iperfBandwidth int64, iperfDuration int64, iperfServer string, num int) {
+
+	time.Sleep(time.Duration(runIperfAfterSeconds) * time.Second)
+
+	var cmd *exec.Cmd
+	startPort := 5401
+	// Server
+	if iperfServer == "" {
+		// cmd = exec.Command("/usr/bin/iperf", "-u", "-s", "-p", fmt.Sprintf("%d", startPort+num))
+		cmd = exec.Command("./goben", "-udp", "-readSize=9000", "-connections=6", fmt.Sprintf("-defaultPort=:%d", startPort+num))
+	} else { // Client {
+		if runIperfAfterSeconds == -1 {
+			return
+		} // ,
+		cmd = exec.Command("./goben", "-udp", "-connections=6", "-passiveServer=true", "-writeSize=9000", fmt.Sprintf("-defaultPort=:%d", startPort+num), "-hosts", iperfServer, fmt.Sprintf("-totalDuration=%ds", iperfDuration))
+		// cmd = exec.Command("/usr/bin/iperf", "-u", "-p", fmt.Sprintf("%d", startPort+num), "4", "-c", iperfServer, "-b", fmt.Sprintf("%dm", iperfBandwidth), "-t", strconv.FormatInt(iperfDuration, 10))
+	}
+
+	fmt.Println(cmd.Args)
+
+	outfile, err := os.Create(fmt.Sprintf("./iperf-%d.txt", num))
+	if err != nil {
+		panic(err)
+	}
+	defer outfile.Close()
+	cmd.Stdout = outfile
+	cmd.Stderr = outfile
+	err = cmd.Start()
+	fmt.Println(err)
+	err2 := cmd.Wait()
+	fmt.Println(err2)
+}
+
 func mainErr() error {
 	tagflag.Parse(&flags)
 	defer envpprof.Stop()
@@ -247,6 +376,17 @@ func mainErr() error {
 	clientConfig.Seed = flags.Seed
 	clientConfig.PublicIp4 = flags.PublicIP
 	clientConfig.PublicIp6 = flags.PublicIP
+	clientConfig.LAddr = flags.LAddr
+
+	clientConfig.NumMaxCons = flags.NumMaxCons
+	clientConfig.NearestXPercent = flags.NearestXPercent
+	if flags.TimeSlotInterval > 0 {
+		clientConfig.TimeSlotInterval = flags.TimeSlotInterval
+	}
+
+	clientConfig.PathSelectionType = flags.PathSelectionType
+	clientConfig.PathSelectionFunc = flags.PathSelectionFunc
+
 	if flags.PackedBlocklist != "" {
 		blocklist, err := iplist.MMapPackedFile(flags.PackedBlocklist)
 		if err != nil {
@@ -256,16 +396,20 @@ func mainErr() error {
 		clientConfig.IPBlocklist = blocklist
 	}
 	if flags.Mmap {
-		clientConfig.DefaultStorage = storage.NewMMap("")
+		// clientConfig.DefaultStorage = storage.NewBoltDB("tmp")
+		clientConfig.DefaultStorage = storage.NewMMap(flags.StorageDir)
+		// clientConfig.DefaultStorage = storage.NewFileByInfoHash("tmp")
+	} else {
+		// clientConfig.DefaultStorage = storage.NewBoltDB(flags.StorageDir)
 	}
 	if flags.Addr != nil {
 		clientConfig.SetListenAddr(flags.Addr.String())
 	}
 	if flags.UploadRate != -1 {
-		clientConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(flags.UploadRate), 256<<10)
+		clientConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(flags.UploadRate), 256<<10) // TMPCHANGE 10
 	}
 	if flags.DownloadRate != -1 {
-		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(flags.DownloadRate), 1<<20)
+		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(flags.DownloadRate), 1<<20) // TMPCHANGE 20
 	}
 	if flags.Quiet {
 		clientConfig.Logger = log.Discard
@@ -282,13 +426,17 @@ func mainErr() error {
 		clientConfig.ListenPort = flags.TcpPort
 	}
 
+	if flags.MaxRequestsPerPeer > 0 {
+		clientConfig.MaxRequestsPerPeer = flags.MaxRequestsPerPeer
+	}
+
 	clientConfig.ReuseFirstPath = flags.ReuseFirstPath
 
 	// if !flags.Seed {
 	clientConfig.PerformanceBenchmarkClient = flags.PClient
 	clientConfig.DisableIPv6 = true
 	clientConfig.PerformanceBenchmark = true
-
+	clientConfig.NoDHT = true
 	if flags.PClient {
 		clientConfig.NoUpload = true
 		clientConfig.DisableTrackers = true
@@ -302,7 +450,7 @@ func mainErr() error {
 	}
 
 	// }
-
+	clientConfig.DisableAcceptRateLimiting = true
 	if flags.Scion {
 		clientConfig.DisableScion = false
 
@@ -313,6 +461,7 @@ func mainErr() error {
 		clientConfig.PublicScionAddr = addr
 		clientConfig.SetScionListenAddr(flags.LocalScionAddr)
 		var peers []*snet.UDPAddr
+		var sPaths []*snet.Path
 		for _, remote := range flags.PeerScionAddrList {
 			peerAddr, err := snet.ParseUDPAddr(remote)
 			if err != nil {
@@ -328,25 +477,36 @@ func mainErr() error {
 				numPaths = clientConfig.MaxConnectionsPerPeer
 			}
 
+			// Use the same path X times
+			if clientConfig.ReuseFirstPath && clientConfig.AllowDuplicatePaths {
+				numPaths = clientConfig.MaxConnectionsPerPeer
+			}
+
 			fmt.Printf("Using %d paths to scion peer %s due to MaxConnectionsPerPeer\n", numPaths, remote)
 
 			for i := 0; i < numPaths; i++ {
-				pathAddr := torrent.ChoosePath(peerAddr, paths[i])
+				var pathAddr *snet.UDPAddr
 
 				if flags.ReuseFirstPath {
-					pathAddr = torrent.ChoosePath(peerAddr, paths[0])
+					pathAddr = torrent.ChoosePath(peerAddr, paths[1])
 					fmt.Printf("Reusing first path %s to scion peer %s\n", paths[0], remote)
+					sPaths = append(sPaths, &paths[0])
 				} else {
+					pathAddr = torrent.ChoosePath(peerAddr, paths[i])
 					fmt.Printf("Using path %s to scion peer %s\n", paths[i], remote)
+					fmt.Printf("Fingerprint %s", paths[i].Fingerprint())
+					sPaths = append(sPaths, &paths[i])
 				}
 
 				peers = append(peers, pathAddr)
+
 			}
 		}
 		if len(peers) == 0 {
 			fmt.Printf("Warning: Scion was enabled, but no valid remote address was given\n")
 		}
 		clientConfig.RemoteScionAddrs = peers
+		clientConfig.RemoteScionPaths = sPaths
 		clientConfig.DisableAcceptRateLimiting = true
 		clientConfig.DisableTrackers = true
 		if flags.ScionOnly {
@@ -368,9 +528,10 @@ func mainErr() error {
 				fmt.Printf("Failed to parse remote tcp addr: %v, %v, ignoring\n", remote, err)
 				continue
 			}
-
 			clientConfig.RemoteTCPAddrs = append(clientConfig.RemoteTCPAddrs, addr)
+
 		}
+		fmt.Println(clientConfig.RemoteTCPAddrs)
 	}
 
 	if flags.UDPOnly {
@@ -420,10 +581,59 @@ func mainErr() error {
 	}
 	addTorrents(client)
 	start := time.Now()
+	pid := os.Getpid()
+	s := []string{}
+
+	pidsStr, ok := os.LookupEnv("PERF_PIDS")
+	if ok {
+		s = strings.Split(pidsStr, ",")
+	}
+
+	s1 := strconv.FormatInt(int64(pid), 10)
+	s = append(s, s1)
+
+	s = Map(s, func(s string) string { return fmt.Sprintf("p-%s", s) })
+	fmt.Printf("Calling perf.sh with args %s", s)
+	fmt.Println(s)
+	s = append([]string{"./perf.sh"}, s...)
+
+	cmd := exec.Command("bash", s...)
+	defer cmd.Process.Kill()
+	outfile, err := os.Create(fmt.Sprintf("./perf-%s.txt", s1))
+	if err != nil {
+		panic(err)
+	}
+	defer outfile.Close()
+	cmd.Stdout = outfile
+	cmd.Stderr = outfile
+	err = cmd.Start()
+	fmt.Println(err)
+	go func() {
+		err2 := cmd.Wait()
+		fmt.Println(err2)
+	}()
+
+	/*if flags.Seed {
+		err := ListenQuicTest()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	} else {
+		err := DialQuicTest()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}*/
+
+	go runIperf(flags.RunIperfAfterSeconds, flags.IperfBandwidth, flags.IperfDuration, flags.IperfServer, 1)
+	go runIperf(flags.RunIperfAfterSeconds, flags.IperfBandwidth, flags.IperfDuration, flags.IperfServer2, 2)
 	if client.WaitAll() {
 		elapsed := time.Since(start)
 		log.Printf("Binomial took %s", elapsed)
 		log.Print("downloaded ALL the torrents")
+
 	} else {
 		return xerrors.New("y u no complete torrents?!")
 	}

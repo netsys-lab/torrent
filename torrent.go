@@ -9,7 +9,7 @@ import (
 	"math/rand"
 	"net"
 	"net/url"
-	"os"
+	"sort"
 	"sync"
 	"text/tabwriter"
 	"time"
@@ -747,19 +747,29 @@ func (t *Torrent) pieceLength(piece pieceIndex) pp.Integer {
 }
 
 func (t *Torrent) hashPiece(piece pieceIndex) (ret metainfo.Hash) {
-	hash := pieceHash.New()
-	p := t.piece(piece)
-	p.waitNoPendingWrites()
-	ip := t.info.Piece(int(piece))
-	pl := ip.Length()
-	n, err := io.Copy(hash, io.NewSectionReader(t.pieces[piece].Storage(), 0, pl))
-	if n == pl {
-		missinggo.CopyExact(&ret, hash.Sum(nil))
-		return
-	}
-	if err != io.ErrUnexpectedEOF && !os.IsNotExist(err) {
-		t.logger.Printf("unexpected error hashing piece %d through %T: %s", piece, t.storage.TorrentImpl, err)
-	}
+	// TMPCHANGE, removed piece hashing
+	/*
+		hash := pieceHash.New()
+		p := t.piece(piece)
+		p.waitNoPendingWrites()
+		ip := t.info.Piece(int(piece))
+		pl := ip.Length()
+
+		// TMPCHANGE, removed piece hashing
+		// n := pl
+		// err := nil
+		// _, err := hash.Write(p.hash.Bytes())
+		// n := pl
+		// n, err := io.Copy(hash, *p.hash, 0, pl)
+		// n, err := io.Copy(hash, io.NewSectionReader(t.pieces[piece].Storage(), 0, pl))
+		/*if int64(n) == pl {
+			// fmt.Println("COPY EXACT...")
+			missinggo.CopyExact(&ret, p.hash) //hash.Sum(nil))
+			return
+		}
+		if err != io.ErrUnexpectedEOF && !os.IsNotExist(err) {
+			t.logger.Printf("unexpected error hashing piece %d through %T: %s", piece, t.storage.TorrentImpl, err)
+		}*/
 	return
 }
 
@@ -838,7 +848,7 @@ func (t *Torrent) worstBadConn() *connection {
 		// connection quota and is older than a minute.
 		if wcs.Len() >= (t.maxEstablishedConns+1)/2 {
 			// Give connections 1 minute to prove themselves.
-			if time.Since(c.completedHandshake) > time.Minute {
+			if time.Since(*c.completedHandshake) > time.Minute {
 				return c
 			}
 		}
@@ -1051,6 +1061,19 @@ func (t *Torrent) openNewConns() {
 		p := t.peers.PopMax()
 		fmt.Println("OPEN CONNECTION")
 		fmt.Println(p)
+
+		fmt.Println("-.--.--.--.--.--.-")
+		if p.IsScion {
+			fmt.Println("SCION PEER")
+			p, err := p.ScionAddr.GetPath()
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				fmt.Println(p)
+				fmt.Println(p.Interfaces())
+			}
+		}
+		fmt.Println("-.--.--.--.--.--.-")
 		t.initiateConn(p)
 	}
 }
@@ -1487,6 +1510,11 @@ func (t *Torrent) addConnection(c *connection) (err error) {
 	if len(t.conns) >= t.maxEstablishedConns {
 		panic(len(t.conns))
 	}
+
+	// if !t.cl.PathSelectionHandshakeTime(c) {
+	// 	return errors.New("HandshakeTime does not want this connection")
+	// }
+	t.cl.connections = append(t.cl.connections, c)
 	t.conns[c] = struct{}{}
 	return nil
 }
@@ -1520,6 +1548,33 @@ func (t *Torrent) SetMaxEstablishedConns(max int) (oldMax int) {
 	return oldMax
 }
 
+func (t *Torrent) conRacing() {
+	var raceAfterChunks int64 = 1000
+	useConns := 1
+	log.Printf("CONRACING, %d \n", t.stats.ChunksRead.n)
+	if t.stats.ChunksRead.n >= raceAfterChunks {
+		log.Printf("Reached %d pieces, apply conRacing\n", raceAfterChunks)
+		cons := t.unclosedConnsAsSlice()
+
+		// TODO: Test with ChunksRead etc
+		sort.Slice(cons, func(i, j int) bool {
+			return cons[i].stats.ChunksRead.n < cons[j].stats.ChunksRead.n
+		})
+
+		for i, c := range cons {
+			if i >= useConns {
+				log.Printf("Choking con %s", c)
+				c.Choke(func(msg pp.Message) bool {
+					c.wroteMsg(&msg)
+					c.writeBuffer.Write(msg.MustMarshalBinary())
+					torrent.Add(fmt.Sprintf("messages filled of type %s", msg.Type.String()), 1)
+					return c.writeBuffer.Len() < 1<<16 // 64KiB
+				})
+			}
+		}
+	}
+}
+
 func (t *Torrent) pieceHashed(piece pieceIndex, correct bool) {
 	t.logger.Log(log.Fstr("hashed piece %d (passed=%t)", piece, correct).WithValues(debugLogValue))
 	p := t.piece(piece)
@@ -1544,6 +1599,7 @@ func (t *Torrent) pieceHashed(piece pieceIndex, correct bool) {
 			// Don't increment stats above connection-level for every involved
 			// connection.
 			t.allStats((*ConnStats).incrementPiecesDirtiedGood)
+			// t.conRacing()
 		}
 		for _, c := range touchers {
 			c.stats.incrementPiecesDirtiedGood()
@@ -1623,7 +1679,7 @@ func (t *Torrent) onIncompletePiece(piece pieceIndex) {
 }
 
 func (t *Torrent) tryCreateMorePieceHashers() {
-	for t.activePieceHashes < 2 && t.tryCreatePieceHasher() {
+	for t.activePieceHashes < 2 && t.tryCreatePieceHasher() { //TMPCHANGE 2
 	}
 }
 
@@ -1660,13 +1716,17 @@ func (t *Torrent) getPieceToHash() (ret pieceIndex, ok bool) {
 
 func (t *Torrent) pieceHasher(index pieceIndex) {
 	p := t.piece(index)
-	sum := t.hashPiece(index)
+	// TMPCHANGE, remove piece hashing
+	// sum := t.hashPiece(index)
+	t.hashPiece(index)
 	t.storageLock.RUnlock()
 	t.cl.lock()
 	defer t.cl.unlock()
 	p.hashing = false
 	t.updatePiecePriority(index)
-	t.pieceHashed(index, sum == *p.hash)
+	// TMPCHANGE, remove piece hashing
+	t.pieceHashed(index, true)
+	// t.pieceHashed(index, sum == *p.hash)
 	t.publishPieceChange(index)
 	t.activePieceHashes--
 	t.tryCreateMorePieceHashers()
@@ -1735,7 +1795,7 @@ func (t *Torrent) initiateConn(peer Peer) {
 		return
 	}
 	t.halfOpen[addrString] = peer
-	go t.cl.outgoingConnection(t, addr, peer.Source)
+	go t.cl.outgoingConnection(t, addr, peer.Source, peer.ScionPath)
 }
 
 func (t *Torrent) AddClientPeer(cl *Client) {

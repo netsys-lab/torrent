@@ -38,6 +38,7 @@ func GetPathsFromAddr(lAddr, rAddr *snet.UDPAddr, shouldBeUnique bool) ([]snet.P
 		fmt.Println("Available paths:")
 		for _, path := range pathSet {
 			fmt.Printf("[%2d] %d %s\n", i, len(path.Interfaces())/2, path)
+			fmt.Println(path.Interfaces())
 		}
 
 		if !shouldBeUnique {

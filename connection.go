@@ -40,15 +40,19 @@ const (
 // Maintains the state of a connection with a peer.
 type connection struct {
 	// First to ensure 64-bit alignment for atomics. See #262.
-	stats ConnStats
-
-	t *Torrent
+	stats                ConnStats
+	BytesReadOverTime    map[int64]int64
+	BytesWrittenOverTime map[int64]int64
+	TimeInterval         int64
+	Ticker               *time.Ticker
+	t                    *Torrent
 	// The actual Conn, used for closing, and setting socket options.
 	conn       net.Conn
 	outgoing   bool
 	network    string
 	remoteAddr IpPort
 	scionAddr  *snet.UDPAddr
+	scionPath  *snet.Path
 	// The Reader and Writer for this Conn, with hooks installed for stats,
 	// limiting, deadlines etc.
 	w io.Writer
@@ -63,7 +67,8 @@ type connection struct {
 	reconciledHandshakeStats bool
 
 	lastMessageReceived     time.Time
-	completedHandshake      time.Time
+	completedHandshake      *time.Time
+	startHandshake          time.Time
 	lastUsefulChunkReceived time.Time
 	lastChunkSent           time.Time
 
@@ -118,7 +123,10 @@ type connection struct {
 	uploadTimer *time.Timer
 	writerCond  sync.Cond
 
-	logger log.Logger
+	logger           log.Logger
+	lastReadBytes    int64
+	lastWrittenBytes int64
+	WasClosed        bool
 }
 
 func (cn *connection) updateExpectingChunks() {
@@ -285,7 +293,7 @@ func (cn *connection) WriteStatus(w io.Writer, t *Torrent) {
 	fmt.Fprintf(w, "%+-55q %s %s-%s\n", cn.PeerID, cn.PeerExtensionBytes, cn.localAddr(), cn.remoteAddr)
 	fmt.Fprintf(w, "    last msg: %s, connected: %s, last helpful: %s, itime: %s, etime: %s\n",
 		eventAgeString(cn.lastMessageReceived),
-		eventAgeString(cn.completedHandshake),
+		eventAgeString(*cn.completedHandshake),
 		eventAgeString(cn.lastHelpful()),
 		cn.cumInterest(),
 		cn.totalExpectingTime(),
@@ -304,6 +312,7 @@ func (cn *connection) WriteStatus(w io.Writer, t *Torrent) {
 		cn.statusFlags(),
 		cn.downloadRate()/(1<<10),
 	)
+
 	fmt.Fprintf(w, "    next pieces: %v%s\n",
 		iter.ToSlice(iter.Head(10, cn.iterPendingPiecesUntyped)),
 		func() string {
@@ -313,6 +322,33 @@ func (cn *connection) WriteStatus(w io.Writer, t *Torrent) {
 				return ""
 			}
 		}())
+
+	fmt.Println("-----------------------------------")
+	if cn.network == "scion" {
+		fmt.Println("SCION Connection")
+
+		if cn.scionPath != nil {
+			fmt.Println("SCION PATH AVAILABLE")
+			fmt.Println((*(cn.scionPath)).Interfaces())
+		}
+	}
+	fmt.Println("Bytes read over Time")
+	fmt.Println(cn.BytesReadOverTime)
+	fmt.Println("Bytes written over Time")
+	fmt.Println(cn.BytesWrittenOverTime)
+
+	for key, value := range cn.BytesReadOverTime {
+		cn.BytesReadOverTime[key] = (value / 1024 / 1024) * 8
+	}
+	for key, value := range cn.BytesWrittenOverTime {
+		cn.BytesWrittenOverTime[key] = (value / 1024 / 1024) * 8
+	}
+
+	fmt.Println("Mbit read over Time")
+	fmt.Println(cn.BytesReadOverTime)
+	fmt.Println("Mbit written over Time")
+	fmt.Println(cn.BytesWrittenOverTime)
+	fmt.Println("-----------------------------------")
 }
 
 func (cn *connection) Close() {
@@ -402,9 +438,12 @@ func (cn *connection) nominalMaxRequests() (ret int) {
 	}
 	return int(clamp(
 		1,
-		int64(cn.PeerMaxRequests),
-		max(64,
-			cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()))))
+		// cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
+		//int64(cn.PeerMaxRequests),
+		// max(64,
+		//	int64(cn.PeerMaxRequests)))) // TODO: TMP CHANGE
+		cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
+		int64(cn.PeerMaxRequests)))
 }
 
 func (cn *connection) totalExpectingTime() (ret time.Duration) {
@@ -555,6 +594,7 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 			}
 		}
 	}
+	fmt.Printf("Torrent has numPieces %d, completed %d\n", cn.t.numPieces(), cn.t.numPiecesCompleted())
 	if len(cn.requests) <= cn.requestsLowWater {
 		filledBuffer := false
 		cn.iterPendingPieces(func(pieceIndex pieceIndex) bool {
@@ -563,7 +603,11 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 					filledBuffer = true
 					return false
 				}
+				// TMPCHANGE
 				if len(cn.requests) >= cn.nominalMaxRequests() {
+					fmt.Printf("Pending pieces len %d\n", cn.t.pendingPieces.Len())
+					fmt.Printf("Pending requests len %d\n", len(cn.t.pendingRequests))
+					// fmt.Printf("Nom max requests reached for pieceIndex %d\n", pieceIndex)
 					return false
 				}
 				// Choking is looked at here because our interest is dependent
@@ -585,8 +629,10 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 			// If we didn't completely top up the requests, we shouldn't mark
 			// the low water, since we'll want to top up the requests as soon
 			// as we have more write buffer space.
+			// fmt.Printf("COULD NOT FILL UP BUFFER \n")
 			return
 		}
+		// fmt.Printf("FILL LOWWATER TO %d", len(cn.requests)/2)
 		cn.requestsLowWater = len(cn.requests) / 2
 	}
 
@@ -623,7 +669,7 @@ func (cn *connection) writer(keepAliveTimeout time.Duration) {
 				cn.wroteMsg(&msg)
 				cn.writeBuffer.Write(msg.MustMarshalBinary())
 				torrent.Add(fmt.Sprintf("messages filled of type %s", msg.Type.String()), 1)
-				return cn.writeBuffer.Len() < 1<<16 // 64KiB
+				return cn.writeBuffer.Len() < 1<<16 // TMPCHANGE 16 64KiB
 			})
 		}
 		if cn.writeBuffer.Len() == 0 && time.Since(lastWrite) >= keepAliveTimeout {
@@ -1071,6 +1117,15 @@ func (c *connection) onReadRequest(r request) error {
 	return nil
 }
 
+func (c *connection) TimerTick(interval int64) {
+	if c != nil {
+		c.BytesReadOverTime[interval] = c.stats.BytesRead.n - c.lastReadBytes
+		c.BytesWrittenOverTime[interval] = c.stats.BytesWritten.n - c.lastWrittenBytes
+		c.lastReadBytes = c.stats.BytesRead.n
+		c.lastWrittenBytes = c.stats.BytesWritten.n
+	}
+}
+
 // Processes incoming BitTorrent wire-protocol messages. The client lock is held upon entry and
 // exit. Returning will end the connection.
 func (c *connection) mainReadLoop() (err error) {
@@ -1084,8 +1139,13 @@ func (c *connection) mainReadLoop() (err error) {
 	t := c.t
 	cl := t.cl
 
+	c.BytesReadOverTime[0] = 0
+	c.BytesWrittenOverTime[0] = 0
+	c.lastReadBytes = 0
+	c.lastWrittenBytes = 0
+
 	decoder := pp.Decoder{
-		R:         bufio.NewReaderSize(c.r, 1<<17),
+		R:         bufio.NewReaderSize(c.r, 1<<17), //TMPCHANGE 17
 		MaxLength: 256 * 1024,
 		Pool:      t.chunkPool,
 	}
@@ -1097,6 +1157,7 @@ func (c *connection) mainReadLoop() (err error) {
 			err = decoder.Decode(&msg)
 		}()
 		if t.closed.IsSet() || c.closed.IsSet() || err == io.EOF {
+
 			return nil
 		}
 		if err != nil {
@@ -1207,9 +1268,10 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 			c.t.logger.Printf("error parsing extended handshake message %q: %s", payload, err)
 			return errors.Wrap(err, "unmarshalling extended handshake payload")
 		}
-		if d.Reqq != 0 {
-			c.PeerMaxRequests = d.Reqq
-		}
+		// if d.Reqq != 0 {
+		//	fmt.Printf("SET MAXREQUESTS TO %d\n\n", d.Reqq)
+		//	c.PeerMaxRequests = d.Reqq
+		// }
 		c.PeerClientName = d.V
 		if c.PeerExtensionIDs == nil {
 			c.PeerExtensionIDs = make(map[pp.ExtensionName]pp.ExtensionNumber, len(d.M))
@@ -1225,6 +1287,14 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 				return errors.Wrapf(err, "setting metadata size to %d", d.MetadataSize)
 			}
 		}
+		fmt.Println("HANDSHOOK CONN")
+		fmt.Println(c.remoteAddr)
+		if c.scionAddr != nil {
+			path, _ := c.scionAddr.GetPath()
+			fmt.Printf("%s\n", c.scionAddr.String())
+			fmt.Printf("%s\n", path.Fingerprint())
+		}
+
 		c.requestPendingMetadata()
 		return nil
 	case metadataExtendedId:
@@ -1527,6 +1597,7 @@ func (c *connection) sendChunk(r request, msg func(pp.Message) bool) (more bool,
 	// Count the chunk being sent, even if it isn't.
 	b := make([]byte, r.Length)
 	p := c.t.info.Piece(int(r.Index))
+	// fmt.Println("SEND CHUNK")
 	n, err := c.t.readAt(b, p.Offset()+int64(r.Begin))
 	if n != len(b) {
 		if err == nil {

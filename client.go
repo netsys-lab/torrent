@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mrand "math/rand"
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,9 +55,10 @@ type Client struct {
 	event  sync.Cond
 	closed missinggo.Event
 
-	config *ClientConfig
-	logger log.Logger
-
+	config         *ClientConfig
+	logger         log.Logger
+	connections    []*connection
+	realCons       []*connection
 	peerID         PeerID
 	defaultStorage *storage.Client
 	onClose        []func()
@@ -72,11 +75,16 @@ type Client struct {
 	badPeerIPs        map[string]struct{}
 	torrents          map[InfoHash]*Torrent
 
-	acceptLimiter   map[ipStr]int
-	dialRateLimiter *rate.Limiter
+	acceptLimiter                  map[ipStr]int
+	dialRateLimiter                *rate.Limiter
+	pathSelectionHandshakeTimeDone bool
 }
 
 type ipStr string
+
+func (cl *Client) GetConns() []*connection {
+	return cl.connections
+}
 
 func (cl *Client) BadPeerIPs() []string {
 	cl.rLock()
@@ -186,10 +194,13 @@ func NewClient(cfg *ClientConfig) (cl *Client, err error) {
 		}
 	}()
 	cl = &Client{
-		config:            cfg,
-		dopplegangerAddrs: make(map[string]struct{}),
-		torrents:          make(map[metainfo.Hash]*Torrent),
-		dialRateLimiter:   rate.NewLimiter(10, 10),
+		config:                         cfg,
+		dopplegangerAddrs:              make(map[string]struct{}),
+		torrents:                       make(map[metainfo.Hash]*Torrent),
+		dialRateLimiter:                rate.NewLimiter(10, 10),
+		connections:                    make([]*connection, 20),
+		realCons:                       make([]*connection, 0),
+		pathSelectionHandshakeTimeDone: false,
 	}
 	go cl.acceptLimitClearer()
 	cl.initLogger()
@@ -307,6 +318,7 @@ func (cl *Client) listenNetworks() (ns []network) {
 			ns = append(ns, n)
 		}
 	}
+	fmt.Println(ns)
 	return
 }
 
@@ -557,7 +569,7 @@ func (cl *Client) dialFirst(ctx context.Context, addr net.Addr) (res dialResult)
 					return
 				}
 				left++
-				//cl.logger.Printf("dialing %s on %s/%s", addr, s.Addr().Network(), s.Addr())
+				fmt.Printf("dialing %s on %s/%s\n", addr, s.Addr().Network(), s.Addr())
 				go func() {
 					resCh <- dialResult{
 						cl.dialFromSocket(ctx, s, addr),
@@ -650,6 +662,7 @@ func (cl *Client) noLongerHalfOpen(t *Torrent, addr string) {
 // *connection if no connection for valid reasons.
 func (cl *Client) handshakesConnection(ctx context.Context, nc net.Conn, t *Torrent, encryptHeader bool, remoteAddr net.Addr) (c *connection, err error) {
 	c = cl.newConnection(nc, true, remoteAddr)
+	c.startHandshake = time.Now()
 	c.headerEncrypted = encryptHeader
 	ctx, cancel := context.WithTimeout(ctx, cl.config.HandshakesTimeout)
 	defer cancel()
@@ -716,9 +729,16 @@ func (cl *Client) establishOutgoingConn(t *Torrent, addr net.Addr) (c *connectio
 
 // Called to dial out and run a connection. The addr we're given is already
 // considered half-open.
-func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource) {
+func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource, scionPath *snet.Path) {
 	cl.dialRateLimiter.Wait(context.Background())
 	c, err := cl.establishOutgoingConn(t, addr)
+
+	if scionPath != nil && c != nil {
+		fmt.Println("SET SCION PATH")
+		fmt.Println((*scionPath).Interfaces())
+		c.scionPath = scionPath
+	}
+
 	cl.lock()
 	defer cl.unlock()
 	// Don't release lock between here and addConnection, unless it's for
@@ -837,7 +857,10 @@ func (cl *Client) connBtHandshake(c *connection, ih *metainfo.Hash) (ret metainf
 	ret = res.Hash
 	c.PeerExtensionBytes = res.PeerExtensionBits
 	c.PeerID = res.PeerID
-	c.completedHandshake = time.Now()
+	t := time.Now()
+	c.completedHandshake = &t
+	cl.realCons = append(cl.realCons, c)
+	cl.PathSelectionHandshakeTime(false)
 	return
 }
 
@@ -876,6 +899,7 @@ func (cl *Client) runReceivedConn(c *connection) {
 
 func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 	c.setTorrent(t)
+	fmt.Println("GOT HANDSHAKE CONN")
 	if c.PeerID == cl.peerID {
 		if c.outgoing {
 			connsToSelf.Add(1)
@@ -904,10 +928,163 @@ func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 	defer t.dropConnection(c)
 	go c.writer(time.Minute)
 	cl.sendInitialMessages(c, t)
+	/* if cl.PathSelectionHandshakeTime(c) {
+		c.SetInterested(false, func(msg pp.Message) bool {
+			c.Post(msg)
+			return true
+		})
+		c.Choke(func(msg pp.Message) bool {
+			c.Post(msg)
+			return true
+		});
+
+		fmt.Println("PATH SELECTION SUCCESSFULL")
+
+
+	} else {
+		fmt.Println("Client decided to drop connection due to handshakeTime func")
+		c.Close()
+	}*/
+
 	err := c.mainReadLoop()
 	if err != nil && cl.config.Debug {
 		cl.logger.Printf("error during connection main read loop: %s", err)
 	}
+
+}
+
+func calcDiffPercent(a, b, p int64) bool {
+	if a == b {
+		return false
+	}
+	x := ((b * 100) / (a))
+
+	if x < p {
+		fmt.Printf("(%d < %d) for a=%d,b=%d\n", x, p, a, b)
+	}
+
+	return (x < p)
+}
+
+func (cl *Client) PathSelectionDownloadTime(timeSlot int64) {
+
+	// fmt.Printf("DOWNLOAD TIME at slot %d\n", timeSlot)
+
+	if cl.config.PathSelectionFunc < 1 {
+		return
+	}
+
+	newConns := make([]*connection, len(cl.realCons))
+	copy(newConns, cl.realCons)
+	sort.Slice(newConns, func(i, j int) bool {
+		return newConns[i].BytesReadOverTime[timeSlot] > newConns[j].BytesReadOverTime[timeSlot]
+	})
+
+	// fmt.Println("SORTED CONNS")
+	// for i, con := range newConns {
+	//		fmt.Printf("con %d has BytesReadOverTime %d", i, con.BytesReadOverTime[timeSlot])
+	//	}
+
+	if cl.config.PathSelectionFunc == 1 { // numCons
+		for i, con := range newConns {
+			if i >= (cl.config.NumMaxCons - 1) {
+				con.Close()
+			} else {
+				// con.Close()
+			}
+		}
+	} else if cl.config.PathSelectionFunc == 2 { // nearest neighbour
+
+		for _, con := range newConns {
+			if !con.WasClosed && calcDiffPercent(newConns[0].BytesReadOverTime[timeSlot], con.BytesReadOverTime[timeSlot], cl.config.NearestXPercent) {
+				con.Close()
+				con.WasClosed = true
+				fmt.Printf("CLOSING CONN DUE TO NearestXPercent in timeslot %d", timeSlot)
+			} else {
+				// con.Close()
+			}
+		}
+	}
+}
+
+func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
+
+	if cl.config.PathSelectionFunc < 1 {
+		return
+	}
+
+	if cl.pathSelectionHandshakeTimeDone {
+		// fmt.Println("SKIP Handshake Time Path Selection")
+		return
+	}
+	if len(cl.realCons) < cl.config.MaxConnectionsPerPeer && !forceSelect {
+		fmt.Println("Move to later Handshake Time Path Selection")
+		return
+	}
+	fmt.Println("RUN Handshake Time Path Selection")
+	for _, con := range cl.realCons {
+		if con.completedHandshake == nil {
+			fmt.Println("FOUND NOT SET COMPLETED HANDSHAKE")
+			return
+		}
+	}
+
+	newConns := make([]*connection, len(cl.realCons))
+	copy(newConns, cl.realCons)
+	sort.Slice(newConns, func(i, j int) bool {
+		diffI := newConns[i].completedHandshake.UnixNano() - newConns[i].startHandshake.UnixNano()
+		diffJ := newConns[j].completedHandshake.UnixNano() - newConns[j].startHandshake.UnixNano()
+		return diffI < diffJ
+	})
+
+	for _, con := range newConns {
+		fmt.Println(con.completedHandshake.UnixNano())
+		fmt.Println(con.startHandshake.UnixNano())
+		fmt.Printf("%d\n", con.completedHandshake.UnixNano()-con.startHandshake.UnixNano())
+		fmt.Println("-------------------")
+	}
+
+	if cl.config.PathSelectionFunc == 1 { // numCons, works
+		for i, con := range newConns {
+			if i > (cl.config.NumMaxCons - 1) {
+				if con.scionPath != nil {
+					fmt.Println((*con.scionPath).Interfaces())
+				}
+
+				fmt.Println(fmt.Println(con))
+				fmt.Println("CLOSING CONN DUE TO NUMMAXCONS in pathselect")
+				con.Close()
+			}
+		}
+	} else if cl.config.PathSelectionFunc == 2 { // nearest neighbour
+
+		for _, con := range newConns {
+			if calcDiffPercent(newConns[0].completedHandshake.Unix(), con.completedHandshake.Unix(), cl.config.NearestXPercent) {
+				/*con.SetInterested(false, func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+				con.Choke(func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})*/
+				fmt.Println("CLOSING CONN DUE TO NearestXPercent")
+				con.Close()
+			} else {
+				/*con.SetInterested(true, func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})
+				con.Unchoke(func(msg pp.Message) bool {
+					con.Post(msg)
+					return true
+				})*/
+
+			}
+		}
+	}
+	fmt.Println("FINISH SELECTION")
+	cl.pathSelectionHandshakeTimeDone = true
 }
 
 // See the order given in Transmission's tr_peerMsgsNew.
@@ -922,7 +1099,7 @@ func (cl *Client) sendInitialMessages(conn *connection, torrent *Torrent) {
 						pp.ExtensionNameMetadata: metadataExtendedId,
 					},
 					V:            cl.config.ExtendedHandshakeClientVersion,
-					Reqq:         64, // TODO: Really?
+					Reqq:         64, // TESTCHANGE: 64, TODO: Really?
 					YourIp:       pp.CompactIp(conn.remoteAddr.IP),
 					Encryption:   cl.config.HeaderObfuscationPolicy.Preferred || !cl.config.HeaderObfuscationPolicy.RequirePreferred,
 					Port:         cl.incomingPeerPort(),
@@ -1049,10 +1226,13 @@ func (cl *Client) newTorrent(ih metainfo.Hash, specStorage storage.ClientImpl) (
 		peers: prioritizedPeers{
 			om: btree.New(32),
 			getPrio: func(p Peer) peerPriority {
-				if p.IsScion {
+				// TODO: TMP CHANGE
+				// return 1
+				return uint32(p.Port) + uint32(mrand.Intn(100))
+				/*if p.IsScion {
 					return 1
 				}
-				return bep40PriorityIgnoreError(cl.publicAddr(p.IP), p.addr())
+				return bep40PriorityIgnoreError(cl.publicAddr(p.IP), p.addr())*/
 			},
 		},
 		conns: make(map[*connection]struct{}, 2*cl.config.EstablishedConnsPerTorrent),
@@ -1119,20 +1299,22 @@ func (cl *Client) AddTorrentInfoHashWithStorage(infoHash metainfo.Hash, specStor
 // provides one. Returns new if the torrent wasn't already in the client.
 // Note that any `Storage` defined on the spec will be ignored if the
 // torrent is already present (i.e. `new` return value is `true`)
-func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err error) {
-	cl.logger.Printf("AddTorrentSpec(): %v", spec)
-	t, new = cl.AddTorrentInfoHashWithStorage(spec.InfoHash, spec.Storage)
+func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
+	// cl.logger.Printf("AddTorrentSpec(): %v", spec) TODO: Add torrent spec
+	t, new := cl.AddTorrentInfoHashWithStorage(spec.InfoHash, spec.Storage)
+	fmt.Printf("NEW TORR DEBUG DEBUG %s\n", t)
 	if spec.DisplayName != "" {
 		t.SetDisplayName(spec.DisplayName)
 	}
 	if spec.InfoBytes != nil {
-		err = t.SetInfoBytes(spec.InfoBytes)
+		err := t.SetInfoBytes(spec.InfoBytes)
 		if err != nil {
-			return
+			return nil, false, err
 		}
 	}
 	cl.lock()
 	defer cl.unlock()
+	fmt.Printf("CHUNK SIZE %d", spec.ChunkSize)
 	if spec.ChunkSize != 0 {
 		t.setChunkSize(pp.Integer(spec.ChunkSize))
 	}
@@ -1142,10 +1324,11 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 
 	if !cl.config.DisableScion {
 		var pp []Peer
-		for _, scionRemote := range cl.config.RemoteScionAddrs {
+		for i, scionRemote := range cl.config.RemoteScionAddrs {
 			pp = append(pp, Peer{
 				IsScion:   true,
 				ScionAddr: scionRemote,
+				ScionPath: cl.config.RemoteScionPaths[i],
 			})
 			fmt.Println("ADD SCION ADDR PEER NETWORK")
 			fmt.Println(scionRemote.Network())
@@ -1157,12 +1340,15 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 	if cl.config.TCPOnly {
 		var pp []Peer
 		for _, ta := range cl.config.RemoteTCPAddrs {
-			pp = append(pp, Peer{
-				IP:   ta.IP,
-				Port: ta.Port,
-			})
-			fmt.Println("ADD TCP ADDR PEER NETWORK")
-			fmt.Println(ta.Network())
+			fmt.Printf("MAXCONPERPEER %d\n", cl.config.MaxConnectionsPerPeer)
+			for i := 0; i < cl.config.MaxConnectionsPerPeer; i++ {
+				pp = append(pp, Peer{
+					IP:   ta.IP,
+					Port: ta.Port,
+				})
+				fmt.Println("ADD TCP ADDR PEER NETWORK")
+				fmt.Println(ta.Network())
+			}
 		}
 		for _, ta := range pp {
 			fmt.Println(ta.addr())
@@ -1189,13 +1375,13 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 		t.addPeers(pp)
 	}
 
-	fmt.Println("PEERS")
+	/*fmt.Println("PEERS")
 	t.peers.Each(func(peer Peer) {
 		fmt.Println(peer.addr())
-	})
+	})*/
 
 	t.maybeNewConns()
-	return
+	return t, new, nil
 }
 
 func (cl *Client) dropTorrent(infoHash metainfo.Hash) (err error) {
@@ -1229,12 +1415,42 @@ func (cl *Client) allTorrentsCompleted() bool {
 func (cl *Client) WaitAll() bool {
 	cl.lock()
 	defer cl.unlock()
+
+	ticker := time.NewTicker(time.Duration(cl.config.TimeSlotInterval) * time.Millisecond)
+	done := make(chan bool)
+	var interval int64
+	interval = 0
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				// Update connection stats
+				interval += cl.config.TimeSlotInterval
+				for _, con := range cl.connections {
+					con.TimerTick(interval)
+				}
+				// if interval == cl.config.TimeSlotInterval {
+				cl.PathSelectionHandshakeTime(false)
+				// } else {
+				cl.PathSelectionDownloadTime(interval)
+				// }
+
+			}
+		}
+	}()
+
 	for !cl.allTorrentsCompleted() {
 		if cl.closed.IsSet() {
+			ticker.Stop()
+			done <- true
 			return false
 		}
 		cl.event.Wait()
 	}
+	ticker.Stop()
+	done <- true
 	return true
 }
 
@@ -1263,6 +1479,7 @@ func (cl *Client) AddMagnet(uri string) (T *Torrent, err error) {
 
 func (cl *Client) AddTorrent(mi *metainfo.MetaInfo) (T *Torrent, err error) {
 	T, _, err = cl.AddTorrentSpec(TorrentSpecFromMetaInfo(mi))
+
 	var ss []string
 	slices.MakeInto(&ss, mi.Nodes)
 	cl.AddDHTNodes(ss)
@@ -1320,16 +1537,28 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remote net.Addr) (c 
 			panic("network is scion, but no scion addr")
 		}
 	}
+
+	/*if cl.config.TCPOnly && cl.config.PerformanceBenchmarkClient {
+		maxReq = 10000
+	}
+
+	if cl.config.UDPOnly && cl.config.PerformanceBenchmarkClient {
+		maxReq = 1000
+	}*/
+
 	c = &connection{
-		conn:            nc,
-		outgoing:        outgoing,
-		Choked:          true,
-		PeerChoked:      true,
-		PeerMaxRequests: 250,
-		writeBuffer:     new(bytes.Buffer),
-		remoteAddr:      remoteAddr,
-		network:         remote.Network(),
-		scionAddr:       snetAddr,
+		conn:                 nc,
+		outgoing:             outgoing,
+		Choked:               false, //TMPCHANGE
+		PeerChoked:           false, //TMPCHANGE
+		PeerMaxRequests:      cl.config.MaxRequestsPerPeer,
+		writeBuffer:          new(bytes.Buffer),
+		remoteAddr:           remoteAddr,
+		network:              remote.Network(),
+		scionAddr:            snetAddr,
+		TimeInterval:         1000,
+		BytesReadOverTime:    make(map[int64]int64, 1000),
+		BytesWrittenOverTime: make(map[int64]int64, 1000),
 	}
 	c.logger = cl.logger.WithValues(c,
 		log.Debug, // I want messages to default to debug, and can set it here as it's only used by new code

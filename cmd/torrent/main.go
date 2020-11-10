@@ -27,6 +27,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/gosuri/uiprogress"
+
 	// "github.com/netsec-ethz/scion-apps/pkg/appnet"
 	"golang.org/x/time/rate"
 )
@@ -147,6 +148,7 @@ func addTorrents(client *torrent.Client) error {
 				return t, nil
 			}
 		}()
+		fmt.Printf("ERR ERR ERR %s", err.Error())
 		if err != nil {
 			return xerrors.Errorf("adding torrent for %q: %w", arg, err)
 		}
