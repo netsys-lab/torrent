@@ -161,6 +161,7 @@ type ClientConfig struct {
 	TimeSlotInterval           int64
 	PathSelectionType          int64
 	PathSelectionFunc          int64
+	LAddr                      string
 }
 
 func (cfg *ClientConfig) SetListenAddr(addr string) *ClientConfig {

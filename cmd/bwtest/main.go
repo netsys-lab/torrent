@@ -27,7 +27,7 @@ var flags = struct {
 
 const (
 	PacketSize int64 = 9000
-	NumPackets int64 = 200000
+	NumPackets int64 = 300000
 )
 
 func LogFatal(msg string, a ...interface{}) {
@@ -109,8 +109,10 @@ func runServer(port uint16) error {
 	numPacketsReceived = 0
 	recBuf := make([]byte, PacketSize+1000)
 	go func() {
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 		fmt.Printf("Received %d packets\n", numPacketsReceived)
+		bw := (numPacketsReceived * PacketSize * 8) / 1024 / 1024 / 10
+		fmt.Printf("reached bandwidth %dMbit/s\n", bw)
 	}()
 	for numPacketsReceived < NumPackets {
 		n, err := conn.Read(recBuf)

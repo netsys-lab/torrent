@@ -67,9 +67,10 @@ func mainErr() error {
 			if flags.IsServer {
 				runServer(startPort + i)
 			} else {
-				addrStr := fmt.Sprintf("19-ffaa:1:c3f,[127.0.0.1]:%d", startPort+i)
+				addrStr := fmt.Sprintf("19-ffaa:1:c3f,127.0.0.1:%d", startPort+i)
 				serverAddr, err := appnet.ResolveUDPAddr(addrStr)
 				Check(err)
+				fmt.Println("TEST")
 				runClient(serverAddr)
 			}
 		}(&wg, startPort, i)
@@ -113,6 +114,7 @@ func runClient(serverAddr *snet.UDPAddr) {
 
 func runServer(port uint16) error {
 
+	fmt.Printf("Listen on Port %d", port)
 	conn, err := appnet.ListenPort(port)
 	Check(err)
 
@@ -140,7 +142,7 @@ func runServer(port uint16) error {
 		}
 		if int64(n) != PacketSize {
 			// The packet has incorrect size, do not count as a correct packet
-			fmt.Println("Incorrect size.", n, "bytes instead of", PacketSize)
+			// fmt.Println("Incorrect size.", n, "bytes instead of", PacketSize)
 			continue
 		}
 		// fmt.Printf("Read packet of size %d\n", n)

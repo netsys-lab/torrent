@@ -50,13 +50,46 @@ func listen(n network, cfg *ClientConfig, f firewallCallback) (socket, error) {
 	switch {
 	case n.Tcp:
 		return listenTcp(n.String(), net.JoinHostPort(cfg.ListenHost(n.String()), portStr), cfg.ProxyURL)
+
 	case n.Udp:
-		return listenUtp(n.String(), net.JoinHostPort(cfg.ListenHost(n.String()), portStr), cfg.ProxyURL, f)
+		// return listenUtp(n.String(), net.JoinHostPort(cfg.ListenHost(n.String()), portStr), cfg.ProxyURL, f)
+		return listenQUIC(cfg.LAddr)
 	case n.Scion:
 		return listenScion(cfg.PublicScionAddr)
 	default:
 		panic(n)
 	}
+}
+
+type quicSocket struct {
+	local *net.UDPAddr
+	q     quic.Listener
+	conn  net.PacketConn
+}
+
+func (s *quicSocket) Accept() (net.Conn, error) {
+	fmt.Println("ACCEPT QUIC")
+	x, err := s.q.Accept(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	conn, err := x.AcceptStream(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &squicStreamWrapper{
+		conn,
+		x.LocalAddr,
+		x.RemoteAddr,
+	}, nil
+}
+
+func (s *quicSocket) Close() error {
+	return s.q.Close()
+}
+
+func (s *quicSocket) Addr() net.Addr {
+	return s.local
 }
 
 type scionSocket struct {
@@ -98,6 +131,44 @@ func (w *squicStreamWrapper) LocalAddr() net.Addr {
 }
 func (w *squicStreamWrapper) RemoteAddr() net.Addr {
 	return w.remote()
+}
+
+func (s *quicSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error) {
+
+	fmt.Println("Dial QUIC")
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return nil, err
+	}
+
+	laddr, err := net.ResolveUDPAddr("udp", addr.String())
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println(addr)
+	sess, err := quic.Dial(s.conn, laddr, "127.0.0.1:42425", scion_torrent.TLSCfg, &quic.Config{
+		KeepAlive: true,
+	})
+	fmt.Println(err)
+	if err != nil {
+		return nil, err
+	}
+
+	// sess, err := squic.DialSCION(nil, str, nil, &quic.Config{
+	//	KeepAlive: true,
+	// })
+	if err != nil {
+		return nil, err
+	}
+	conn, err := sess.OpenStreamSync(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &squicStreamWrapper{
+		conn,
+		sess.LocalAddr,
+		sess.RemoteAddr,
+	}, nil
 }
 
 func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error) {
@@ -172,6 +243,38 @@ func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error)
 		sess.LocalAddr,
 		sess.RemoteAddr,
 	}, nil
+}
+
+func listenQUIC(address string) (s socket, err error) {
+	/*if err := scion_torrent.InitScion(address.IA); err != nil {
+		return nil, err
+	}*/
+	fmt.Println("LISTEN QUIC")
+	serverAddr, err := net.ResolveUDPAddr("udp", address)
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return nil, err
+	}
+	/*laddr, err := net.ResolveUDPAddr("udp", address.String())
+	if err != nil {
+		return nil, err
+	}*/
+
+	conn, err := net.ListenPacket("udp", address)
+	fmt.Printf("LISTEN ON %s\n", address)
+	// conn, err := appnet.ListenPort(uint16(address.Host.Port)) //squic.ListenSCION(nil, address, &quic.Config{KeepAlive: true})
+	if err != nil {
+		return nil, err
+	}
+
+	qConn, err := quic.Listen(conn, scion_torrent.TLSCfg, &quic.Config{KeepAlive: true})
+	if err != nil {
+		return nil, err
+	}
+	quicSocket := &quicSocket{}
+	quicSocket.q = qConn
+	quicSocket.local = serverAddr
+	quicSocket.conn = conn
+	return quicSocket, nil
 }
 
 func listenScion(address *snet.UDPAddr) (s socket, err error) {

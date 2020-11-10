@@ -318,6 +318,7 @@ func (cl *Client) listenNetworks() (ns []network) {
 			ns = append(ns, n)
 		}
 	}
+	fmt.Println(ns)
 	return
 }
 
@@ -562,13 +563,13 @@ func (cl *Client) dialFirst(ctx context.Context, addr net.Addr) (res dialResult)
 		cl.eachListener(func(s socket) bool {
 			func() {
 				network := s.Addr().Network()
-				// fmt.Println("GOT NETWORK STRING")
-				// fmt.Println(parseNetworkString(network))
+				fmt.Println("GOT NETWORK STRING")
+				fmt.Println(parseNetworkString(network))
 				if !peerNetworkEnabled(parseNetworkString(network), cl.config) {
 					return
 				}
 				left++
-				//cl.logger.Printf("dialing %s on %s/%s", addr, s.Addr().Network(), s.Addr())
+				fmt.Printf("dialing %s on %s/%s\n", addr, s.Addr().Network(), s.Addr())
 				go func() {
 					resCh <- dialResult{
 						cl.dialFromSocket(ctx, s, addr),

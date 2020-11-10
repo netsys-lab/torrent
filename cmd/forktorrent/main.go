@@ -82,7 +82,7 @@ func mainErr() error {
 				go func(wg *sync.WaitGroup, tr string, i int) {
 					defer wg.Done()
 					//   ./benchtorrent 'magnet:?xt=urn:btih:9fc20b9e98ea98b4a35e6223041a5ef94ea27809' -seed -scion -42425'
-					cmd := exec.Command("./benchtorrent", tr, "-scion", "-seed", fmt.Sprintf("-localScionAddr=19-ffaa:1:c3f,[127.0.0.1]:%d", startPort+i), fmt.Sprintf("-tcpPort=%d", startPort+i))
+					cmd := exec.Command("./benchtorrent", tr, "-scion", "-scionOnly", "-seed", fmt.Sprintf("-localScionAddr=19-ffaa:1:c3f,[127.0.0.1]:%d", startPort+i), fmt.Sprintf("-tcpPort=%d", startPort+i))
 					cmd.Env = os.Environ()
 					cmd.Env = append(cmd.Env, "SCION_CERT_KEY_FILE=/home/martin/mgartner/key.pem")
 					cmd.Env = append(cmd.Env, "SCION_CERT_FILE=/home/martin/mgartner/cert.pem")
@@ -142,10 +142,16 @@ func mainErr() error {
 			for i, torrent := range flags.Torrent {
 				go func(tr string, i int) {
 					// ./benchtorrent 'magnet:?xt=urn:btih:9fc20b9e98ea98b4a35e6223041a5ef94ea27809' -scion -scionOnly -42425' -42425'  -maxRequestsPerPeer=2000
-					cmd := exec.Command("./benchtorrent", tr, "-scion", "-scionOnly", fmt.Sprintf("-peerScionAddrList=19-ffaa:1:c3f,[127.0.0.1]:%d", startPort+i), fmt.Sprintf("-localScionAddr=19-ffaa:1:cf0,[127.0.0.1]:%d", startPort+i), "-stats", fmt.Sprintf("-tcpPort=%d", startPort+i), "-pClient", "-maxConnectionsPerPeer=2", "numMaxCons=3")
+					cmd := exec.Command("./benchtorrent", tr, "-scion", "-scionOnly", "-timeSlotInterval=1000", fmt.Sprintf("-peerScionAddrList=19-ffaa:1:c3f,[127.0.0.1]:%d", startPort+i), fmt.Sprintf("-localScionAddr=19-ffaa:1:cf0,[127.0.0.1]:%d", startPort+i), "-stats", fmt.Sprintf("-tcpPort=%d", startPort+i), "-pClient", "-maxConnectionsPerPeer=2", "numMaxCons=3")
 					cmd.Env = os.Environ()
 					cmd.Env = append(cmd.Env, "SCION_CERT_KEY_FILE=key.pem")
 					cmd.Env = append(cmd.Env, "SCION_CERT_FILE=cert.pem")
+
+					perfPids, ok := os.LookupEnv("PERF_PIDS")
+					if ok {
+						cmd.Env = append(cmd.Env, fmt.Sprintf("PERF_PIDS=%s", perfPids))
+					}
+
 					outfile, err := os.Create(fmt.Sprintf("./out-%d.txt", i))
 					if err != nil {
 						panic(err)
@@ -162,6 +168,6 @@ func mainErr() error {
 		}
 	}
 	wg.Wait()
-	time.Sleep(time.Minute * 5)
+	time.Sleep(time.Minute * 120)
 	return nil
 }

@@ -338,10 +338,10 @@ func (cn *connection) WriteStatus(w io.Writer, t *Torrent) {
 	fmt.Println(cn.BytesWrittenOverTime)
 
 	for key, value := range cn.BytesReadOverTime {
-		cn.BytesReadOverTime[key] = (value / 1000 / 1000) * 8
+		cn.BytesReadOverTime[key] = (value / 1024 / 1024) * 8
 	}
 	for key, value := range cn.BytesWrittenOverTime {
-		cn.BytesWrittenOverTime[key] = (value / 1000 / 1000) * 8
+		cn.BytesWrittenOverTime[key] = (value / 1024 / 1024) * 8
 	}
 
 	fmt.Println("Mbit read over Time")
@@ -439,10 +439,11 @@ func (cn *connection) nominalMaxRequests() (ret int) {
 	return int(clamp(
 		1,
 		// cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
-		int64(cn.PeerMaxRequests),
-		max(64,
-			int64(cn.PeerMaxRequests)))) // TODO: TMP CHANGE
-	// cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()))))
+		//int64(cn.PeerMaxRequests),
+		// max(64,
+		//	int64(cn.PeerMaxRequests)))) // TODO: TMP CHANGE
+		cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
+		int64(cn.PeerMaxRequests)))
 }
 
 func (cn *connection) totalExpectingTime() (ret time.Duration) {
@@ -593,6 +594,7 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 			}
 		}
 	}
+	fmt.Printf("Torrent has numPieces %d, completed %d\n", cn.t.numPieces(), cn.t.numPiecesCompleted())
 	if len(cn.requests) <= cn.requestsLowWater {
 		filledBuffer := false
 		cn.iterPendingPieces(func(pieceIndex pieceIndex) bool {
@@ -601,7 +603,11 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 					filledBuffer = true
 					return false
 				}
+				// TMPCHANGE
 				if len(cn.requests) >= cn.nominalMaxRequests() {
+					fmt.Printf("Pending pieces len %d\n", cn.t.pendingPieces.Len())
+					fmt.Printf("Pending requests len %d\n", len(cn.t.pendingRequests))
+					// fmt.Printf("Nom max requests reached for pieceIndex %d\n", pieceIndex)
 					return false
 				}
 				// Choking is looked at here because our interest is dependent

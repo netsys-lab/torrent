@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"expvar"
 	"fmt"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lucas-clemente/quic-go"
 	"github.com/scionproto/scion/go/lib/snet"
 
 	"golang.org/x/xerrors"
@@ -25,6 +27,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/iplist"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/scion_torrent"
 	"github.com/anacrolix/torrent/storage"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/gosuri/uiprogress"
@@ -218,6 +221,7 @@ var flags = struct {
 	IperfServer           string
 	IperfServer2          string
 	StorageDir            string
+	LAddr                 string
 	tagflag.StartPos
 	Torrent []string `arity:"+" help:"torrent file path or magnet uri"`
 }{
@@ -269,6 +273,68 @@ func main() {
 	}
 }
 
+func ListenQuicTest() error {
+	fmt.Println("LISTEN QUIC")
+	// serverAddr, err := net.ResolveUDPAddr("udp", "10.0.0.2")
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return err
+	}
+	/*laddr, err := net.ResolveUDPAddr("udp", address.String())
+	if err != nil {
+		return nil, err
+	}*/
+
+	conn, err := net.ListenPacket("udp", "10.0.0.2:42428")
+	fmt.Printf("LISTEN ON %s\n", "10.0.0.2:42428")
+	// conn, err := appnet.ListenPort(uint16(address.Host.Port)) //squic.ListenSCION(nil, address, &quic.Config{KeepAlive: true})
+	if err != nil {
+		return err
+	}
+
+	_, err2 := quic.Listen(conn, scion_torrent.TLSCfg, &quic.Config{KeepAlive: true})
+	if err2 != nil {
+		return err2
+	}
+
+	return nil
+}
+
+func DialQuicTest() error {
+
+	fmt.Println("------------------------------")
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return err
+	}
+	laddr, err := net.ResolveUDPAddr("udp", "10.0.0.2:42428")
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("LISTEN PACKET")
+	conn, err := net.ListenPacket("udp", "10.0.0.1:42428")
+
+	fmt.Println("Dial QUIC")
+	if err := scion_torrent.InitSQUICCerts(); err != nil {
+		return err
+	}
+
+	sess, err := quic.Dial(conn, laddr, "127.0.0.1:42425", scion_torrent.TLSCfg, &quic.Config{
+		KeepAlive: true,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("QUIC SESSION")
+	_, err2 := sess.OpenStreamSync(context.Background())
+	if err2 != nil {
+		return err2
+	}
+	fmt.Println("------------------------------")
+	return nil
+}
+
 func runIperf(runIperfAfterSeconds int64, iperfBandwidth int64, iperfDuration int64, iperfServer string, num int) {
 
 	time.Sleep(time.Duration(runIperfAfterSeconds) * time.Second)
@@ -310,6 +376,7 @@ func mainErr() error {
 	clientConfig.Seed = flags.Seed
 	clientConfig.PublicIp4 = flags.PublicIP
 	clientConfig.PublicIp6 = flags.PublicIP
+	clientConfig.LAddr = flags.LAddr
 
 	clientConfig.NumMaxCons = flags.NumMaxCons
 	clientConfig.NearestXPercent = flags.NearestXPercent
@@ -369,7 +436,7 @@ func mainErr() error {
 	clientConfig.PerformanceBenchmarkClient = flags.PClient
 	clientConfig.DisableIPv6 = true
 	clientConfig.PerformanceBenchmark = true
-
+	clientConfig.NoDHT = true
 	if flags.PClient {
 		clientConfig.NoUpload = true
 		clientConfig.DisableTrackers = true
@@ -421,7 +488,7 @@ func mainErr() error {
 				var pathAddr *snet.UDPAddr
 
 				if flags.ReuseFirstPath {
-					pathAddr = torrent.ChoosePath(peerAddr, paths[0])
+					pathAddr = torrent.ChoosePath(peerAddr, paths[1])
 					fmt.Printf("Reusing first path %s to scion peer %s\n", paths[0], remote)
 					sPaths = append(sPaths, &paths[0])
 				} else {
@@ -546,9 +613,22 @@ func mainErr() error {
 		fmt.Println(err2)
 	}()
 
+	/*if flags.Seed {
+		err := ListenQuicTest()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	} else {
+		err := DialQuicTest()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}*/
+
 	go runIperf(flags.RunIperfAfterSeconds, flags.IperfBandwidth, flags.IperfDuration, flags.IperfServer, 1)
 	go runIperf(flags.RunIperfAfterSeconds, flags.IperfBandwidth, flags.IperfDuration, flags.IperfServer2, 2)
-	// go runIperf(flags.RunIperfAfterSeconds, flags.IperfBandwidth, flags.IperfDuration, flags.IperfServer, 2)
 	if client.WaitAll() {
 		elapsed := time.Since(start)
 		log.Printf("Binomial took %s", elapsed)
