@@ -1549,8 +1549,8 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remote net.Addr) (c 
 	c = &connection{
 		conn:                 nc,
 		outgoing:             outgoing,
-		Choked:               false, //TMPCHANGE
-		PeerChoked:           false, //TMPCHANGE
+		Choked:               false,
+		PeerChoked:           false,
 		PeerMaxRequests:      cl.config.MaxRequestsPerPeer,
 		writeBuffer:          new(bytes.Buffer),
 		remoteAddr:           remoteAddr,

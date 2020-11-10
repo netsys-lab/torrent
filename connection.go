@@ -603,10 +603,10 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 					filledBuffer = true
 					return false
 				}
-				// TMPCHANGE
+
 				if len(cn.requests) >= cn.nominalMaxRequests() {
-					fmt.Printf("Pending pieces len %d\n", cn.t.pendingPieces.Len())
-					fmt.Printf("Pending requests len %d\n", len(cn.t.pendingRequests))
+					// fmt.Printf("Pending pieces len %d\n", cn.t.pendingPieces.Len())
+					// fmt.Printf("Pending requests len %d\n", len(cn.t.pendingRequests))
 					// fmt.Printf("Nom max requests reached for pieceIndex %d\n", pieceIndex)
 					return false
 				}
@@ -669,7 +669,7 @@ func (cn *connection) writer(keepAliveTimeout time.Duration) {
 				cn.wroteMsg(&msg)
 				cn.writeBuffer.Write(msg.MustMarshalBinary())
 				torrent.Add(fmt.Sprintf("messages filled of type %s", msg.Type.String()), 1)
-				return cn.writeBuffer.Len() < 1<<16 // TMPCHANGE 16 64KiB
+				return cn.writeBuffer.Len() < 1<<16 // 64KiB
 			})
 		}
 		if cn.writeBuffer.Len() == 0 && time.Since(lastWrite) >= keepAliveTimeout {
@@ -1145,7 +1145,7 @@ func (c *connection) mainReadLoop() (err error) {
 	c.lastWrittenBytes = 0
 
 	decoder := pp.Decoder{
-		R:         bufio.NewReaderSize(c.r, 1<<17), //TMPCHANGE 17
+		R:         bufio.NewReaderSize(c.r, 1<<17),
 		MaxLength: 256 * 1024,
 		Pool:      t.chunkPool,
 	}

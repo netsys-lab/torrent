@@ -406,10 +406,10 @@ func mainErr() error {
 		clientConfig.SetListenAddr(flags.Addr.String())
 	}
 	if flags.UploadRate != -1 {
-		clientConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(flags.UploadRate), 256<<10) // TMPCHANGE 10
+		clientConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(flags.UploadRate), 256<<10)
 	}
 	if flags.DownloadRate != -1 {
-		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(flags.DownloadRate), 1<<20) // TMPCHANGE 20
+		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(flags.DownloadRate), 1<<20)
 	}
 	if flags.Quiet {
 		clientConfig.Logger = log.Discard
