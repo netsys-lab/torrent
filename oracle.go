@@ -37,8 +37,8 @@ func GetPathsFromAddr(lAddr, rAddr *snet.UDPAddr, shouldBeUnique bool) ([]snet.P
 		i := 0
 		fmt.Println("Available paths:")
 		for _, path := range pathSet {
-			fmt.Printf("[%2d] %d %s\n", i, len(path.Interfaces())/2, path)
-			fmt.Println(path.Interfaces())
+			fmt.Printf("[%2d] %s\n", i, path)
+			// fmt.Println(path.Metadata().Interfaces)
 		}
 
 		if !shouldBeUnique {
@@ -48,7 +48,7 @@ func GetPathsFromAddr(lAddr, rAddr *snet.UDPAddr, shouldBeUnique bool) ([]snet.P
 		uniquePaths := unique(pathSet)
 		fmt.Println("Unique paths:")
 		for _, path := range uniquePaths {
-			fmt.Printf("[%2d] %d %s\n", i, len(path.Interfaces())/2, path)
+			fmt.Printf("[%2d]  %s\n", i, path)
 		}
 
 		return uniquePaths, nil
@@ -61,8 +61,8 @@ func ChoosePath(rAddr *snet.UDPAddr, path snet.Path) *snet.UDPAddr {
 	// we need to copy the path to the destination (destination is the whole selected path)
 	newAddr := rAddr.Copy()
 	newAddr.Path = path.Path()
-	newAddr.Path.InitOffsets()
-	newAddr.NextHop = path.OverlayNextHop()
+	// newAddr.Path.InitOffsets()
+	newAddr.NextHop = path.UnderlayNextHop()
 
 	return newAddr
 }

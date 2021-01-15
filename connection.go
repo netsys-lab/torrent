@@ -323,15 +323,6 @@ func (cn *connection) WriteStatus(w io.Writer, t *Torrent) {
 			}
 		}())
 
-	fmt.Println("-----------------------------------")
-	if cn.network == "scion" {
-		fmt.Println("SCION Connection")
-
-		if cn.scionPath != nil {
-			fmt.Println("SCION PATH AVAILABLE")
-			fmt.Println((*(cn.scionPath)).Interfaces())
-		}
-	}
 	fmt.Println("Bytes read over Time")
 	fmt.Println(cn.BytesReadOverTime)
 	fmt.Println("Bytes written over Time")
@@ -441,7 +432,7 @@ func (cn *connection) nominalMaxRequests() (ret int) {
 		// cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
 		//int64(cn.PeerMaxRequests),
 		// max(64,
-		//	int64(cn.PeerMaxRequests)))) // TODO: TMP CHANGE
+		//	int64(cn.PeerMaxRequests))))
 		cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
 		int64(cn.PeerMaxRequests)))
 }
@@ -594,7 +585,7 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 			}
 		}
 	}
-	fmt.Printf("Torrent has numPieces %d, completed %d\n", cn.t.numPieces(), cn.t.numPiecesCompleted())
+	// fmt.Printf("Torrent has numPieces %d, completed %d\n", cn.t.numPieces(), cn.t.numPiecesCompleted())
 	if len(cn.requests) <= cn.requestsLowWater {
 		filledBuffer := false
 		cn.iterPendingPieces(func(pieceIndex pieceIndex) bool {
@@ -1287,12 +1278,11 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 				return errors.Wrapf(err, "setting metadata size to %d", d.MetadataSize)
 			}
 		}
-		fmt.Println("HANDSHOOK CONN")
-		fmt.Println(c.remoteAddr)
+
 		if c.scionAddr != nil {
-			path, _ := c.scionAddr.GetPath()
+			// path, _ := c.scionAddr.GetPath()
 			fmt.Printf("%s\n", c.scionAddr.String())
-			fmt.Printf("%s\n", path.Fingerprint())
+			// fmt.Printf("%s\n", path.Fingerprint())
 		}
 
 		c.requestPendingMetadata()
@@ -1597,7 +1587,7 @@ func (c *connection) sendChunk(r request, msg func(pp.Message) bool) (more bool,
 	// Count the chunk being sent, even if it isn't.
 	b := make([]byte, r.Length)
 	p := c.t.info.Piece(int(r.Index))
-	// fmt.Println("SEND CHUNK")
+
 	n, err := c.t.readAt(b, p.Offset()+int64(r.Begin))
 	if n != len(b) {
 		if err == nil {

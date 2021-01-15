@@ -68,7 +68,6 @@ type quicSocket struct {
 }
 
 func (s *quicSocket) Accept() (net.Conn, error) {
-	fmt.Println("ACCEPT QUIC")
 	x, err := s.q.Accept(context.Background())
 	if err != nil {
 		return nil, err
@@ -134,8 +133,6 @@ func (w *squicStreamWrapper) RemoteAddr() net.Addr {
 }
 
 func (s *quicSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error) {
-
-	fmt.Println("Dial QUIC")
 	if err := scion_torrent.InitSQUICCerts(); err != nil {
 		return nil, err
 	}
@@ -145,11 +142,9 @@ func (s *quicSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error) 
 		return nil, err
 	}
 
-	fmt.Println(addr)
 	sess, err := quic.Dial(s.conn, laddr, "127.0.0.1:42425", scion_torrent.TLSCfg, &quic.Config{
 		KeepAlive: true,
 	})
-	fmt.Println(err)
 	if err != nil {
 		return nil, err
 	}
@@ -172,65 +167,20 @@ func (s *quicSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error) 
 }
 
 func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error) {
-	/*if err := scion_torrent.InitScion(s.local.IA); err != nil {
-		return nil, err
-	}*/
 	fmt.Println("Dial SCION")
 	if err := scion_torrent.InitSQUICCerts(); err != nil {
 		return nil, err
 	}
-	// fmt.Println("ADDRESS:")
-	// fmt.Println(addr.String())
 	snetAddr, ok := addr.(*snet.UDPAddr)
 
 	if !ok {
 		return nil, fmt.Errorf("sdial: invalid addr type: %s", addr.String())
 	}
 
-	// fmt.Println("SNET ADDRESS:")
-	// fmt.Println(snetAddr.String())
-	// Copy the snet addr -> To ensure we won't manipulate the old addr by attaching hops/path
-	//snetAddr := targetAddr.Copy()
-	// str := s.local.String()
-	// front := str[:strings.LastIndex(str, ":")]
-	// newAddr, err := snet.AddrFromString(front)
-	// if err != nil {
-	//	return nil, err
-	//}
-
-	/*if !snetAddr.IA.Equal(newAddr.IA) {
-		// query paths from here to there:
-		pathMgr := snet.DefNetwork.PathResolver()
-		pathSet := pathMgr.Query(context.Background(), newAddr.IA, snetAddr.IA, sciond.PathReqFlags{})
-		if len(pathSet) == 0 {
-			return nil, fmt.Errorf("No Paths")
-		}
-		// print all paths. Also pick one path. Here we chose the path with least hops:
-		i := 0
-		minLength, argMinPath := 999, (*sciond.PathReplyEntry)(nil)
-		fmt.Println("Available paths:")
-		for _, path := range pathSet {
-			fmt.Printf("[%2d] %d %s\n", i, len(path.Entry.Path.Interfaces)/2, path.Entry.Path.String())
-			if len(path.Entry.Path.Interfaces) < minLength {
-				minLength = len(path.Entry.Path.Interfaces)
-				argMinPath = path.Entry
-			}
-			i++
-		}
-		fmt.Println("Chosen path:", argMinPath.Path.String())
-		// we need to copy the path to the destination (destination is the whole selected path)
-		snetAddr.Path = spath.New(argMinPath.Path.FwdPath)
-		snetAddr.Path.InitOffsets()
-		snetAddr.NextHop, _ = argMinPath.HostInfo.Overlay()
-		// get a connection object using that path:
-	}*/
-	// fmt.Println("DIAL ADDR")
 	sess, err := appquic.DialAddr(snetAddr, "127.0.0.1:42425", scion_torrent.TLSCfg, &quic.Config{
 		KeepAlive: true,
 	})
-	// sess, err := squic.DialSCION(nil, str, nil, &quic.Config{
-	//	KeepAlive: true,
-	// })
+
 	if err != nil {
 		return nil, err
 	}
@@ -246,22 +196,12 @@ func (s *scionSocket) dial(ctx context.Context, addr net.Addr) (net.Conn, error)
 }
 
 func listenQUIC(address string) (s socket, err error) {
-	/*if err := scion_torrent.InitScion(address.IA); err != nil {
-		return nil, err
-	}*/
-	fmt.Println("LISTEN QUIC")
 	serverAddr, err := net.ResolveUDPAddr("udp", address)
 	if err := scion_torrent.InitSQUICCerts(); err != nil {
 		return nil, err
 	}
-	/*laddr, err := net.ResolveUDPAddr("udp", address.String())
-	if err != nil {
-		return nil, err
-	}*/
 
 	conn, err := net.ListenPacket("udp", address)
-	fmt.Printf("LISTEN ON %s\n", address)
-	// conn, err := appnet.ListenPort(uint16(address.Host.Port)) //squic.ListenSCION(nil, address, &quic.Config{KeepAlive: true})
 	if err != nil {
 		return nil, err
 	}
@@ -278,18 +218,11 @@ func listenQUIC(address string) (s socket, err error) {
 }
 
 func listenScion(address *snet.UDPAddr) (s socket, err error) {
-	/*if err := scion_torrent.InitScion(address.IA); err != nil {
-		return nil, err
-	}*/
 	if err := scion_torrent.InitSQUICCerts(); err != nil {
 		return nil, err
 	}
-	/*laddr, err := net.ResolveUDPAddr("udp", address.String())
-	if err != nil {
-		return nil, err
-	}*/
 
-	conn, err := appnet.ListenPort(uint16(address.Host.Port)) //squic.ListenSCION(nil, address, &quic.Config{KeepAlive: true})
+	conn, err := appnet.ListenPort(uint16(address.Host.Port))
 	if err != nil {
 		return nil, err
 	}

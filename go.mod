@@ -3,6 +3,7 @@ module github.com/anacrolix/torrent
 require (
 	bazil.org/fuse v0.0.0-20180421153158-65cc252bf669
 	github.com/BurntSushi/toml v0.3.1 // indirect
+	github.com/alangpierce/go-forceexport v0.0.0-20160317203124-8f1d6941cd75 // indirect
 	github.com/alexflint/go-arg v1.1.0
 	github.com/anacrolix/dht/v2 v2.0.5-0.20190913023154-c5780a290ed6
 	github.com/anacrolix/envpprof v1.0.1
@@ -30,21 +31,19 @@ require (
 	github.com/inconshreveable/log15 v0.0.0-20180818164646-67afb5ed74ec
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/lucas-clemente/aes12 v0.0.0-20171027163421-cd47fb39b79f // indirect
-	github.com/lucas-clemente/quic-go v0.15.7
+	github.com/lucas-clemente/quic-go v0.19.2
 	github.com/lucas-clemente/quic-go-certificates v0.0.0-20160823095156-d2f86524cced // indirect
-	github.com/mattn/go-colorable v0.1.4 // indirect
 	github.com/mattn/go-sqlite3 v1.10.0
-	github.com/netsec-ethz/scion-apps v0.1.1-0.20200513085729-4ed293127be3
+	github.com/netsec-ethz/scion-apps v0.3.0
 	github.com/pierrec/xxHash v0.1.5 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/node_exporter v1.0.1 // indirect
-	github.com/scionproto/scion v0.5.0
-	github.com/stretchr/testify v1.4.0
-	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
-	golang.org/x/net v0.0.0-20200707034311-ab3426394381
+	github.com/scionproto/scion v0.6.0
+	github.com/stretchr/testify v1.5.1
+	golang.org/x/net v0.0.0-20200927032502-5d4f70055728
 	golang.org/x/sys v0.0.0-20200622214017-ed371f2e16b4 // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0
-	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 	google.golang.org/protobuf v1.24.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 	gopkg.in/restruct.v1 v1.0.0-20190323193435-3c2afb705f3c // indirect

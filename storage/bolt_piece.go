@@ -36,7 +36,6 @@ func (me *boltDBPiece) Completion() Completion {
 }
 
 func (me *boltDBPiece) MarkComplete() error {
-	// fmt.Println("MARK COMPLETE")
 	return me.pc().Set(me.pk(), true)
 }
 

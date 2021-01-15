@@ -563,8 +563,6 @@ func (cl *Client) dialFirst(ctx context.Context, addr net.Addr) (res dialResult)
 		cl.eachListener(func(s socket) bool {
 			func() {
 				network := s.Addr().Network()
-				fmt.Println("GOT NETWORK STRING")
-				fmt.Println(parseNetworkString(network))
 				if !peerNetworkEnabled(parseNetworkString(network), cl.config) {
 					return
 				}
@@ -735,7 +733,7 @@ func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource, s
 
 	if scionPath != nil && c != nil {
 		fmt.Println("SET SCION PATH")
-		fmt.Println((*scionPath).Interfaces())
+		// fmt.Println((*scionPath).Metadata().Interfaces)
 		c.scionPath = scionPath
 	}
 
@@ -899,7 +897,6 @@ func (cl *Client) runReceivedConn(c *connection) {
 
 func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 	c.setTorrent(t)
-	fmt.Println("GOT HANDSHAKE CONN")
 	if c.PeerID == cl.peerID {
 		if c.outgoing {
 			connsToSelf.Add(1)
@@ -928,23 +925,6 @@ func (cl *Client) runHandshookConn(c *connection, t *Torrent) {
 	defer t.dropConnection(c)
 	go c.writer(time.Minute)
 	cl.sendInitialMessages(c, t)
-	/* if cl.PathSelectionHandshakeTime(c) {
-		c.SetInterested(false, func(msg pp.Message) bool {
-			c.Post(msg)
-			return true
-		})
-		c.Choke(func(msg pp.Message) bool {
-			c.Post(msg)
-			return true
-		});
-
-		fmt.Println("PATH SELECTION SUCCESSFULL")
-
-
-	} else {
-		fmt.Println("Client decided to drop connection due to handshakeTime func")
-		c.Close()
-	}*/
 
 	err := c.mainReadLoop()
 	if err != nil && cl.config.Debug {
@@ -966,9 +946,8 @@ func calcDiffPercent(a, b, p int64) bool {
 	return (x < p)
 }
 
+// TODO: Experimental
 func (cl *Client) PathSelectionDownloadTime(timeSlot int64) {
-
-	// fmt.Printf("DOWNLOAD TIME at slot %d\n", timeSlot)
 
 	if cl.config.PathSelectionFunc < 1 {
 		return
@@ -980,17 +959,10 @@ func (cl *Client) PathSelectionDownloadTime(timeSlot int64) {
 		return newConns[i].BytesReadOverTime[timeSlot] > newConns[j].BytesReadOverTime[timeSlot]
 	})
 
-	// fmt.Println("SORTED CONNS")
-	// for i, con := range newConns {
-	//		fmt.Printf("con %d has BytesReadOverTime %d", i, con.BytesReadOverTime[timeSlot])
-	//	}
-
 	if cl.config.PathSelectionFunc == 1 { // numCons
 		for i, con := range newConns {
 			if i >= (cl.config.NumMaxCons - 1) {
 				con.Close()
-			} else {
-				// con.Close()
 			}
 		}
 	} else if cl.config.PathSelectionFunc == 2 { // nearest neighbour
@@ -998,7 +970,6 @@ func (cl *Client) PathSelectionDownloadTime(timeSlot int64) {
 		for _, con := range newConns {
 			if !con.WasClosed && calcDiffPercent(newConns[0].BytesReadOverTime[timeSlot], con.BytesReadOverTime[timeSlot], cl.config.NearestXPercent) {
 				con.Close()
-				con.WasClosed = true
 				fmt.Printf("CLOSING CONN DUE TO NearestXPercent in timeslot %d", timeSlot)
 			} else {
 				// con.Close()
@@ -1007,6 +978,7 @@ func (cl *Client) PathSelectionDownloadTime(timeSlot int64) {
 	}
 }
 
+// TODO: Experimental
 func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 
 	if cl.config.PathSelectionFunc < 1 {
@@ -1014,7 +986,6 @@ func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 	}
 
 	if cl.pathSelectionHandshakeTimeDone {
-		// fmt.Println("SKIP Handshake Time Path Selection")
 		return
 	}
 	if len(cl.realCons) < cl.config.MaxConnectionsPerPeer && !forceSelect {
@@ -1024,7 +995,6 @@ func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 	fmt.Println("RUN Handshake Time Path Selection")
 	for _, con := range cl.realCons {
 		if con.completedHandshake == nil {
-			fmt.Println("FOUND NOT SET COMPLETED HANDSHAKE")
 			return
 		}
 	}
@@ -1037,21 +1007,10 @@ func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 		return diffI < diffJ
 	})
 
-	for _, con := range newConns {
-		fmt.Println(con.completedHandshake.UnixNano())
-		fmt.Println(con.startHandshake.UnixNano())
-		fmt.Printf("%d\n", con.completedHandshake.UnixNano()-con.startHandshake.UnixNano())
-		fmt.Println("-------------------")
-	}
-
 	if cl.config.PathSelectionFunc == 1 { // numCons, works
 		for i, con := range newConns {
 			if i > (cl.config.NumMaxCons - 1) {
-				if con.scionPath != nil {
-					fmt.Println((*con.scionPath).Interfaces())
-				}
-
-				fmt.Println(fmt.Println(con))
+				fmt.Println(con)
 				fmt.Println("CLOSING CONN DUE TO NUMMAXCONS in pathselect")
 				con.Close()
 			}
@@ -1060,26 +1019,9 @@ func (cl *Client) PathSelectionHandshakeTime(forceSelect bool) {
 
 		for _, con := range newConns {
 			if calcDiffPercent(newConns[0].completedHandshake.Unix(), con.completedHandshake.Unix(), cl.config.NearestXPercent) {
-				/*con.SetInterested(false, func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
-				con.Choke(func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})*/
+				fmt.Println(con)
 				fmt.Println("CLOSING CONN DUE TO NearestXPercent")
 				con.Close()
-			} else {
-				/*con.SetInterested(true, func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})
-				con.Unchoke(func(msg pp.Message) bool {
-					con.Post(msg)
-					return true
-				})*/
-
 			}
 		}
 	}
@@ -1226,8 +1168,8 @@ func (cl *Client) newTorrent(ih metainfo.Hash, specStorage storage.ClientImpl) (
 		peers: prioritizedPeers{
 			om: btree.New(32),
 			getPrio: func(p Peer) peerPriority {
-				// TODO: TMP CHANGE
 				// return 1
+				// TODO: This collidates somehow with duplicate priorities
 				return uint32(p.Port) + uint32(mrand.Intn(100))
 				/*if p.IsScion {
 					return 1
@@ -1330,28 +1272,19 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
 				ScionAddr: scionRemote,
 				ScionPath: cl.config.RemoteScionPaths[i],
 			})
-			fmt.Println("ADD SCION ADDR PEER NETWORK")
-			fmt.Println(scionRemote.Network())
 		}
-		fmt.Println(pp)
 		t.addPeers(pp)
 	}
 
 	if cl.config.TCPOnly {
 		var pp []Peer
 		for _, ta := range cl.config.RemoteTCPAddrs {
-			fmt.Printf("MAXCONPERPEER %d\n", cl.config.MaxConnectionsPerPeer)
 			for i := 0; i < cl.config.MaxConnectionsPerPeer; i++ {
 				pp = append(pp, Peer{
 					IP:   ta.IP,
 					Port: ta.Port,
 				})
-				fmt.Println("ADD TCP ADDR PEER NETWORK")
-				fmt.Println(ta.Network())
 			}
-		}
-		for _, ta := range pp {
-			fmt.Println(ta.addr())
 		}
 
 		t.addPeers(pp)
@@ -1364,21 +1297,10 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
 				IP:   ta.IP,
 				Port: ta.Port,
 			})
-			fmt.Println("ADD UDP ADDR PEER NETWORK")
-			fmt.Println(pp)
-		}
-
-		for _, ta := range pp {
-			fmt.Println(ta.addr())
 		}
 
 		t.addPeers(pp)
 	}
-
-	/*fmt.Println("PEERS")
-	t.peers.Each(func(peer Peer) {
-		fmt.Println(peer.addr())
-	})*/
 
 	t.maybeNewConns()
 	return t, new, nil

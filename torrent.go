@@ -1052,21 +1052,6 @@ func (t *Torrent) openNewConns() {
 			return
 		}
 		p := t.peers.PopMax()
-		fmt.Println("OPEN CONNECTION")
-		fmt.Println(p)
-
-		fmt.Println("-.--.--.--.--.--.-")
-		if p.IsScion {
-			fmt.Println("SCION PEER")
-			p, err := p.ScionAddr.GetPath()
-			if err != nil {
-				fmt.Println(err)
-			} else {
-				fmt.Println(p)
-				fmt.Println(p.Interfaces())
-			}
-		}
-		fmt.Println("-.--.--.--.--.--.-")
 		t.initiateConn(p)
 	}
 }
@@ -1592,7 +1577,6 @@ func (t *Torrent) pieceHashed(piece pieceIndex, correct bool) {
 			// Don't increment stats above connection-level for every involved
 			// connection.
 			t.allStats((*ConnStats).incrementPiecesDirtiedGood)
-			// t.conRacing()
 		}
 		for _, c := range touchers {
 			c.stats.incrementPiecesDirtiedGood()
@@ -1716,7 +1700,6 @@ func (t *Torrent) pieceHasher(index pieceIndex) {
 	defer t.cl.unlock()
 	p.hashing = false
 	t.updatePiecePriority(index)
-	// t.pieceHashed(index, true)
 	t.pieceHashed(index, sum == *p.hash)
 	t.publishPieceChange(index)
 	t.activePieceHashes--
@@ -1778,9 +1761,6 @@ func (t *Torrent) initiateConn(peer Peer) {
 	} else {
 		addr = peer.ScionAddr
 		addrString = addr.String()
-		fmt.Println("INITIATE SCION CONN PEER")
-		fmt.Println(addr)
-		fmt.Println(addr.Network())
 	}
 	if t.addrActive(addrString) {
 		return
