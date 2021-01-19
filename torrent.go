@@ -755,8 +755,8 @@ func (t *Torrent) hashPiece(piece pieceIndex) (ret metainfo.Hash) {
 	pl := ip.Length()
 
 	n, err := io.Copy(hash, io.NewSectionReader(t.pieces[piece].Storage(), 0, pl))
-	if int64(n) == pl {
-		missinggo.CopyExact(&ret, p.hash) //hash.Sum(nil))
+	if n == pl {
+		missinggo.CopyExact(&ret, hash.Sum(nil))
 		return
 	}
 	if err != io.ErrUnexpectedEOF && !os.IsNotExist(err) {
@@ -1666,7 +1666,6 @@ func (t *Torrent) getPieceToHash() (ret pieceIndex, ok bool) {
 func (t *Torrent) pieceHasher(index pieceIndex) {
 	p := t.piece(index)
 	sum := t.hashPiece(index)
-	t.hashPiece(index)
 	t.storageLock.RUnlock()
 	t.cl.lock()
 	defer t.cl.unlock()
