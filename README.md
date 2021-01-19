@@ -19,20 +19,20 @@ Some noteworthy package dependencies that can be used for other purposes include
 
 ## Installation
 
-Install the library package with `go get github.com/martenwallewein/torrent`, or the provided cmds with `go get github.com/martenwallewein/torrent/cmd/...`.
+Install the library package with `go get github.com/martin31821/torrent`, or the provided cmds with `go get github.com/martin31821/torrent/cmd/...`.
 
 ## Library examples
 
 There are some small [examples](https://godoc.org/github.com/anacrolix/torrent#pkg-examples) in the package documentation.
 
 ## SCION usage
-Build the `benchtorrent` binary in cmd/benchtorrent
+Build the `torrent` binary in cmd/torrent
 
 To run a seeder:
-`SCION_CERT_KEY_FILE=key.pem SCION_CERT_FILE=cert.pem ./benchtorrent '5G1.torrent' -seed -scion -localScionAddr='19-ffaa:1:fff,[127.0.0.1]:42425' -scionOnly`
+`SCION_CERT_KEY_FILE=key.pem SCION_CERT_FILE=cert.pem ./torrent '5G1.torrent' -seed -scion -localScionAddr='19-ffaa:1:fff,[127.0.0.1]:42425' -scionOnly`
 
 To run a leecher:
-`SCION_CERT_KEY_FILE=key.pem SCION_CERT_FILE=cert.pem ./benchtorrent '5G1.torrent' -scion -scionOnly -peerScionAddrList='19-ffaa:1:fff,[127.0.0.1]:42425' -localScionAddr='19-ffaa:1:ddd,[127.0.0.1]:42425' -pClient -maxConnectionsPerPeer=2 -numMaxCons=3 -stats`
+`SCION_CERT_KEY_FILE=key.pem SCION_CERT_FILE=cert.pem ./torrent '5G1.torrent' -scion -scionOnly -peerScionAddrList='19-ffaa:1:fff,[127.0.0.1]:42425' -localScionAddr='19-ffaa:1:ddd,[127.0.0.1]:42425' -pClient -maxConnectionsPerPeer=2 -numMaxCons=3 -stats`
 
 ## Downstream projects
 

@@ -112,7 +112,9 @@ func (cl *Client) LocalPort() (port int) {
 		}
 		if port == 0 {
 			port = _port
-		} /*else if port != _port {
+		}
+		// This must be removed to support multiple identical addresses for multipath SCION
+		/*else if port != _port {
 			panic("mismatched ports")
 		}*/
 		return true
@@ -318,7 +320,6 @@ func (cl *Client) listenNetworks() (ns []network) {
 			ns = append(ns, n)
 		}
 	}
-	fmt.Println(ns)
 	return
 }
 
@@ -567,7 +568,7 @@ func (cl *Client) dialFirst(ctx context.Context, addr net.Addr) (res dialResult)
 					return
 				}
 				left++
-				fmt.Printf("dialing %s on %s/%s\n", addr, s.Addr().Network(), s.Addr())
+				cl.logger.Printf("dialing %s on %s/%s\n", addr, s.Addr().Network(), s.Addr())
 				go func() {
 					resCh <- dialResult{
 						cl.dialFromSocket(ctx, s, addr),
@@ -649,6 +650,7 @@ func forgettableDialError(err error) bool {
 }
 
 func (cl *Client) noLongerHalfOpen(t *Torrent, addr string) {
+	// This must be removed to support multiple identical addresses for multipath SCION
 	/*if _, ok := t.halfOpen[addr]; !ok {
 		panic("invariant broken")
 	}*/
@@ -727,15 +729,9 @@ func (cl *Client) establishOutgoingConn(t *Torrent, addr net.Addr) (c *connectio
 
 // Called to dial out and run a connection. The addr we're given is already
 // considered half-open.
-func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource, scionPath *snet.Path) {
+func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps peerSource) {
 	cl.dialRateLimiter.Wait(context.Background())
 	c, err := cl.establishOutgoingConn(t, addr)
-
-	if scionPath != nil && c != nil {
-		fmt.Println("SET SCION PATH")
-		// fmt.Println((*scionPath).Metadata().Interfaces)
-		c.scionPath = scionPath
-	}
 
 	cl.lock()
 	defer cl.unlock()
@@ -1041,7 +1037,7 @@ func (cl *Client) sendInitialMessages(conn *connection, torrent *Torrent) {
 						pp.ExtensionNameMetadata: metadataExtendedId,
 					},
 					V:            cl.config.ExtendedHandshakeClientVersion,
-					Reqq:         64, // TESTCHANGE: 64, TODO: Really?
+					Reqq:         64, // TODO: Really?
 					YourIp:       pp.CompactIp(conn.remoteAddr.IP),
 					Encryption:   cl.config.HeaderObfuscationPolicy.Preferred || !cl.config.HeaderObfuscationPolicy.RequirePreferred,
 					Port:         cl.incomingPeerPort(),
@@ -1241,10 +1237,9 @@ func (cl *Client) AddTorrentInfoHashWithStorage(infoHash metainfo.Hash, specStor
 // provides one. Returns new if the torrent wasn't already in the client.
 // Note that any `Storage` defined on the spec will be ignored if the
 // torrent is already present (i.e. `new` return value is `true`)
-func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
+func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err error) {
 	// cl.logger.Printf("AddTorrentSpec(): %v", spec) TODO: Add torrent spec
-	t, new := cl.AddTorrentInfoHashWithStorage(spec.InfoHash, spec.Storage)
-	fmt.Printf("NEW TORR DEBUG DEBUG %s\n", t)
+	t, new = cl.AddTorrentInfoHashWithStorage(spec.InfoHash, spec.Storage)
 	if spec.DisplayName != "" {
 		t.SetDisplayName(spec.DisplayName)
 	}
@@ -1256,7 +1251,7 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
 	}
 	cl.lock()
 	defer cl.unlock()
-	fmt.Printf("CHUNK SIZE %d", spec.ChunkSize)
+
 	if spec.ChunkSize != 0 {
 		t.setChunkSize(pp.Integer(spec.ChunkSize))
 	}
@@ -1303,7 +1298,7 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (*Torrent, bool, error) {
 	}
 
 	t.maybeNewConns()
-	return t, new, nil
+	return
 }
 
 func (cl *Client) dropTorrent(infoHash metainfo.Hash) (err error) {
@@ -1353,12 +1348,8 @@ func (cl *Client) WaitAll() bool {
 				for _, con := range cl.connections {
 					con.TimerTick(interval)
 				}
-				// if interval == cl.config.TimeSlotInterval {
 				cl.PathSelectionHandshakeTime(false)
-				// } else {
 				cl.PathSelectionDownloadTime(interval)
-				// }
-
 			}
 		}
 	}()
@@ -1460,14 +1451,6 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remote net.Addr) (c 
 		}
 	}
 
-	/*if cl.config.TCPOnly && cl.config.PerformanceBenchmarkClient {
-		maxReq = 10000
-	}
-
-	if cl.config.UDPOnly && cl.config.PerformanceBenchmarkClient {
-		maxReq = 1000
-	}*/
-
 	c = &connection{
 		conn:                 nc,
 		outgoing:             outgoing,
@@ -1504,9 +1487,7 @@ func (cl *Client) onDHTAnnouncePeer(ih metainfo.Hash, p dht.Peer) {
 	if t == nil {
 		return
 	}
-	/*if cl.config.PerformanceBenchmark {
-		return
-	}*/
+
 	t.addPeers([]Peer{{
 		IP:     p.IP,
 		Port:   p.Port,

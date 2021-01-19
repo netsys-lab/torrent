@@ -429,10 +429,6 @@ func (cn *connection) nominalMaxRequests() (ret int) {
 	}
 	return int(clamp(
 		1,
-		// cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
-		//int64(cn.PeerMaxRequests),
-		// max(64,
-		//	int64(cn.PeerMaxRequests))))
 		cn.stats.ChunksReadUseful.Int64()-(cn.stats.ChunksRead.Int64()-cn.stats.ChunksReadUseful.Int64()),
 		int64(cn.PeerMaxRequests)))
 }
@@ -585,7 +581,6 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 			}
 		}
 	}
-	// fmt.Printf("Torrent has numPieces %d, completed %d\n", cn.t.numPieces(), cn.t.numPiecesCompleted())
 	if len(cn.requests) <= cn.requestsLowWater {
 		filledBuffer := false
 		cn.iterPendingPieces(func(pieceIndex pieceIndex) bool {
@@ -596,9 +591,6 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 				}
 
 				if len(cn.requests) >= cn.nominalMaxRequests() {
-					// fmt.Printf("Pending pieces len %d\n", cn.t.pendingPieces.Len())
-					// fmt.Printf("Pending requests len %d\n", len(cn.t.pendingRequests))
-					// fmt.Printf("Nom max requests reached for pieceIndex %d\n", pieceIndex)
 					return false
 				}
 				// Choking is looked at here because our interest is dependent
@@ -620,10 +612,8 @@ func (cn *connection) fillWriteBuffer(msg func(pp.Message) bool) {
 			// If we didn't completely top up the requests, we shouldn't mark
 			// the low water, since we'll want to top up the requests as soon
 			// as we have more write buffer space.
-			// fmt.Printf("COULD NOT FILL UP BUFFER \n")
 			return
 		}
-		// fmt.Printf("FILL LOWWATER TO %d", len(cn.requests)/2)
 		cn.requestsLowWater = len(cn.requests) / 2
 	}
 
@@ -1259,10 +1249,9 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 			c.t.logger.Printf("error parsing extended handshake message %q: %s", payload, err)
 			return errors.Wrap(err, "unmarshalling extended handshake payload")
 		}
-		// if d.Reqq != 0 {
-		//	fmt.Printf("SET MAXREQUESTS TO %d\n\n", d.Reqq)
-		//	c.PeerMaxRequests = d.Reqq
-		// }
+		if d.Reqq != 0 {
+			c.PeerMaxRequests = d.Reqq
+		}
 		c.PeerClientName = d.V
 		if c.PeerExtensionIDs == nil {
 			c.PeerExtensionIDs = make(map[pp.ExtensionName]pp.ExtensionNumber, len(d.M))
@@ -1278,13 +1267,6 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 				return errors.Wrapf(err, "setting metadata size to %d", d.MetadataSize)
 			}
 		}
-
-		if c.scionAddr != nil {
-			// path, _ := c.scionAddr.GetPath()
-			fmt.Printf("%s\n", c.scionAddr.String())
-			// fmt.Printf("%s\n", path.Fingerprint())
-		}
-
 		c.requestPendingMetadata()
 		return nil
 	case metadataExtendedId:
@@ -1308,7 +1290,7 @@ func (c *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (e
 		var peers Peers
 		peers.AppendFromPex(pexMsg.Added6, pexMsg.Added6Flags)
 		peers.AppendFromPex(pexMsg.Added, pexMsg.AddedFlags)
-		// t.addPeers(peers)
+		t.addPeers(peers)
 		return nil
 	default:
 		return fmt.Errorf("unexpected extended message ID: %v", id)

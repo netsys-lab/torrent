@@ -10,9 +10,6 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 )
 
-var files map[string]*os.File
-var wfiles map[string]*os.File
-
 // File-based storage for torrents, that isn't yet bound to a particular
 // torrent.
 type fileClientImpl struct {
@@ -32,8 +29,6 @@ func infoHashPathMaker(baseDir string, info *metainfo.Info, infoHash metainfo.Ha
 
 // All Torrent data stored in this baseDir
 func NewFile(baseDir string) ClientImpl {
-	files = make(map[string]*os.File)
-	wfiles = make(map[string]*os.File)
 	return NewFileWithCompletion(baseDir, pieceCompletionForDir(baseDir))
 }
 
@@ -131,14 +126,7 @@ type fileTorrentImplIO struct {
 // Returns EOF on short or missing file.
 func (fst *fileTorrentImplIO) readFileAt(fi metainfo.FileInfo, b []byte, off int64) (n int, err error) {
 	var f *os.File
-	// f, ok := files[fst.fts.fileInfoName(fi)]
-	// if !ok {
-	// 	f, err = os.Open(fst.fts.fileInfoName(fi))
-	// 	files[fst.fts.fileInfoName(fi)] = f
-	// }
 	f, err = os.Open(fst.fts.fileInfoName(fi))
-
-	// files["test"].Name()
 
 	if os.IsNotExist(err) {
 		// File missing is treated the same as a short file.
@@ -154,7 +142,7 @@ func (fst *fileTorrentImplIO) readFileAt(fi metainfo.FileInfo, b []byte, off int
 		b = b[:fi.Length-off]
 	}
 	n, err = f.ReadAt(b, off)
-	/*for off < fi.Length && len(b) != 0 {
+	for off < fi.Length && len(b) != 0 {
 		n1, err1 := f.ReadAt(b, off)
 		b = b[n1:]
 		n += n1
@@ -163,7 +151,7 @@ func (fst *fileTorrentImplIO) readFileAt(fi metainfo.FileInfo, b []byte, off int
 			err = err1
 			break
 		}
-	}*/
+	}
 	return
 }
 
@@ -210,12 +198,6 @@ func (fst fileTorrentImplIO) WriteAt(p []byte, off int64) (n int, err error) {
 		os.MkdirAll(filepath.Dir(name), 0777)
 		var f *os.File
 		f, err = os.OpenFile(name, os.O_WRONLY|os.O_CREATE, 0666)
-		//
-		// f, ok := wfiles[name]
-		// if !ok {
-		//	f, err = os.OpenFile(name, os.O_WRONLY|os.O_CREATE, 0666)
-		//	wfiles[name] = f
-		// }
 		if err != nil {
 			return
 		}
