@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -102,6 +103,7 @@ func (t *Torrent) SubscribePieceStateChanges() *pubsub.Subscription {
 func (t *Torrent) Seeding() bool {
 	t.cl.lock()
 	defer t.cl.unlock()
+	fmt.Printf("Torrent is Seeding %b", t.seeding())
 	return t.seeding()
 }
 

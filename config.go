@@ -131,9 +131,10 @@ type ClientConfig struct {
 	// Scion Related fields.
 	// At the moment, only a static set of remotes is supported, i.e. no autoconfig
 	// To keep the PoC easy
-	PublicScionAddr  *snet.Addr
+	PublicScionAddr  *snet.UDPAddr
 	DisableScion     bool
-	RemoteScionAddrs []*snet.Addr
+	RemoteScionAddrs []*snet.UDPAddr
+	RemoteScionPaths []*snet.Path
 
 	DisableAcceptRateLimiting bool
 	// Don't add connections that have the same peer ID as an existing
@@ -144,6 +145,23 @@ type ClientConfig struct {
 
 	// OnQuery hook func
 	DHTOnQuery func(query *krpc.Msg, source net.Addr) (propagate bool)
+
+	PerformanceBenchmark       bool
+	PerformanceBenchmarkClient bool
+	RemoteTCPAddrs             []*net.TCPAddr
+	RemoteUDPAddrs             []*net.UDPAddr
+	MaxConnectionsPerPeer      int
+	AllowDuplicatePaths        bool
+	TCPOnly                    bool
+	UDPOnly                    bool
+	ReuseFirstPath             bool
+	MaxRequestsPerPeer         int
+	NumMaxCons                 int
+	NearestXPercent            int64
+	TimeSlotInterval           int64
+	PathSelectionType          int64
+	PathSelectionFunc          int64
+	LAddr                      string
 }
 
 func (cfg *ClientConfig) SetListenAddr(addr string) *ClientConfig {
@@ -185,11 +203,15 @@ func NewDefaultClientConfig() *ClientConfig {
 			Preferred:        true,
 			RequirePreferred: false,
 		},
-		CryptoSelector: mse.DefaultCryptoSelector,
-		CryptoProvides: mse.AllSupportedCrypto,
-		ListenPort:     42069,
-		Logger:         log.Default,
-		DisableScion:   true,
+		CryptoSelector:        mse.DefaultCryptoSelector,
+		CryptoProvides:        mse.AllSupportedCrypto,
+		ListenPort:            42424,
+		Logger:                log.Default,
+		DisableScion:          true,
+		MaxConnectionsPerPeer: 1,
+		AllowDuplicatePaths:   false,
+		MaxRequestsPerPeer:    250,
+		TimeSlotInterval:      1000,
 	}
 	cc.ConnTracker.SetNoMaxEntries()
 	cc.ConnTracker.Timeout = func(conntrack.Entry) time.Duration { return 0 }
