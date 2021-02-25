@@ -125,9 +125,7 @@ type fileTorrentImplIO struct {
 
 // Returns EOF on short or missing file.
 func (fst *fileTorrentImplIO) readFileAt(fi metainfo.FileInfo, b []byte, off int64) (n int, err error) {
-	var f *os.File
-	f, err = os.Open(fst.fts.fileInfoName(fi))
-
+	f, err := os.Open(fst.fts.fileInfoName(fi))
 	if os.IsNotExist(err) {
 		// File missing is treated the same as a short file.
 		err = io.EOF
@@ -141,7 +139,6 @@ func (fst *fileTorrentImplIO) readFileAt(fi metainfo.FileInfo, b []byte, off int
 	if int64(len(b)) > fi.Length-off {
 		b = b[:fi.Length-off]
 	}
-	n, err = f.ReadAt(b, off)
 	for off < fi.Length && len(b) != 0 {
 		n1, err1 := f.ReadAt(b, off)
 		b = b[n1:]
